@@ -1,31 +1,28 @@
 <!DOCTYPE html>
-<html lang="es-CL">
+<html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#102A43">
-  <meta name="description" content="Mi TNE Digital - Saldo compartido entre celular y tarjeta TNE">
-  <title>Mi Pase TNE · Billetera Estudiantil</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Billetera y Validador TNE conectado en tiempo real con Arduino UNO R4 WiFi y Supabase" />
+  <title>Mi Pase TNE — Validador en Cabina</title>
   <style>
     :root {
+      --bg-canvas: #F1F5F9;
+      --bg-surface: #FFFFFF;
+      --bg-elevated: #F8FAFC;
       --navy-header: #102A43;
-      --navy-pill: #1E3A5F;
-      --bg-page: #F1F5F9;
-      --bg-card: #FFFFFF;
-      --bg-subtle: #F8FAFC;
-      --border-light: #E2E8F0;
-      --text-main: #0F172A;
+      --navy-accent: #1E3A8A;
+      --text-primary: #0F172A;
       --text-secondary: #475569;
       --text-muted: #64748B;
-      --blue-primary: #155EEF;
-      --blue-hover: #1D4ED8;
-      --blue-soft: #EFF6FF;
-      --green-main: #15803D;
-      --green-soft: #DCFCE7;
-      --red-main: #B91C1C;
-      --red-soft: #FEE2E2;
-      --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --border-subtle: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --green-ok: #15803D;
+      --green-bg: #DCFCE7;
+      --red-err: #B91C1C;
+      --red-bg: #FEE2E2;
+      --amber-warn: #B45309;
+      --amber-bg: #FEF3C7;
     }
 
     * {
@@ -36,9 +33,9 @@
     }
 
     body {
-      font-family: var(--font-sans);
-      background-color: var(--bg-page);
-      color: var(--text-main);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
       min-height: 100dvh;
       display: flex;
       flex-direction: column;
@@ -48,968 +45,952 @@
 
     .app-shell {
       width: 100%;
-      max-width: 420px;
+      max-width: 430px;
       min-height: 100dvh;
-      background: var(--bg-card);
+      background: var(--bg-canvas);
       display: flex;
       flex-direction: column;
-      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-      position: relative;
+      border-left: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--border-subtle);
     }
 
-    /* Barra superior azul marino estilo Figma */
-    .topbar {
+    /* Encabezado Azul Marino */
+    .top-bar {
       background-color: var(--navy-header);
       color: #FFFFFF;
-      padding: 14px 18px;
+      padding: 14px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     }
 
-    .topbar-brand {
+    .brand-group {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.92rem;
-      font-weight: 600;
+       flex-direction: column;
+    }
+
+    .brand-title {
+      font-size: 1.05rem;
+      font-weight: 700;
       letter-spacing: -0.01em;
     }
 
-    .topbar-brand svg {
-      width: 18px;
-      height: 18px;
-      stroke: #93C5FD;
+    .brand-subtitle {
+      font-size: 0.75rem;
+      color: #93C5FD;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
     }
 
-    .sync-badge {
-      background-color: var(--navy-pill);
-      color: #E2E8F0;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      font-size: 0.68rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      padding: 5px 10px;
-      border-radius: 6px;
+    .btn-config {
+      background: rgba(255, 255, 255, 0.12);
+      color: #FFFFFF;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
       cursor: pointer;
-      text-transform: uppercase;
-    }
-
-    /* Vistas de la aplicación */
-    .screen {
-      display: none;
-      flex: 1;
-      padding: 20px 20px 16px;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }
-
-    .screen.active {
-      display: flex;
-    }
-
-    .status-kicker {
-      font-size: 0.72rem;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
+      min-height: 44px;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      margin-bottom: 6px;
     }
 
-    .status-kicker.blue { color: var(--blue-primary); }
-    .status-kicker.green { color: var(--green-main); }
-    .status-kicker.red { color: var(--red-main); }
+    .btn-config:hover, .btn-config:focus-visible {
+      background: rgba(255, 255, 255, 0.22);
+      outline: 2px solid #93C5FD;
+    }
 
-    .screen-title {
-      font-size: clamp(1.45rem, 5.5vw, 1.75rem);
-      font-weight: 800;
-      letter-spacing: -0.025em;
+    /* Panel Desplegable de Configuración (UID / Servidor / PHP) */
+    .config-drawer {
+      background: #1E293B;
+      color: #F8FAFC;
+      padding: 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      border-bottom: 2px solid #334155;
+    }
+
+    .config-drawer.open {
+      display: flex;
+    }
+
+    .drawer-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #CBD5E1;
+      display: block;
       margin-bottom: 4px;
     }
 
-    .screen-title.green { color: var(--green-main); }
-    .screen-title.red { color: var(--red-main); }
-
-    .screen-subtitle {
-      font-size: 0.86rem;
-      color: var(--text-secondary);
-      max-width: 32ch;
-      line-height: 1.4;
-      margin-bottom: 14px;
-    }
-
-    /* Tarjeta de Saldo Compartido (Cuenta Estudiante + TNE Física) */
-    .shared-wallet-card {
-      width: 100%;
-      background: var(--bg-subtle);
-      border: 1.5px solid var(--border-light);
-      border-radius: 14px;
-      padding: 14px 16px;
-      text-align: left;
-      margin-bottom: 14px;
-    }
-
-    .wallet-top {
+    .input-row {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
+      gap: 8px;
     }
 
-    .wallet-label {
-      font-size: 0.73rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: var(--text-secondary);
-    }
-
-    .linked-pill {
-      font-family: var(--font-mono);
-      font-size: 0.7rem;
-      font-weight: 700;
-      color: var(--blue-primary);
-      background: var(--blue-soft);
-      padding: 3px 8px;
-      border-radius: 999px;
-    }
-
-    .wallet-balance-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-    }
-
-    .wallet-amount {
-      font-size: 2rem;
-      font-weight: 800;
-      color: var(--text-main);
-      font-variant-numeric: tabular-nums;
-      letter-spacing: -0.03em;
-    }
-
-    .wallet-trips {
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: var(--green-main);
-      background: var(--green-soft);
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .wallet-devices {
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid var(--border-light);
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.74rem;
-      color: var(--text-secondary);
-    }
-
-    /* Ilustración Central: Celular emitiendo pago NFC hacia el lector */
-    .tap-zone-wrap {
-      margin: 6px 0 12px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .nfc-waves-top {
-      width: 72px;
-      height: 28px;
-      margin-bottom: 6px;
-      animation: pulseWaves 1.8s infinite ease-in-out;
-    }
-
-    @keyframes pulseWaves {
-      0%, 100% { opacity: 0.55; transform: translateY(0); }
-      50% { opacity: 1; transform: translateY(-3px); }
-    }
-
-    .tne-digital-card {
-      width: 176px;
-      height: 108px;
-      background: linear-gradient(145deg, #102A43 0%, #1E3A8A 100%);
-      border-radius: 14px;
-      padding: 14px;
+    .text-input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #0F172A;
       color: #FFFFFF;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      text-align: left;
-      box-shadow: 0 10px 24px rgba(16, 42, 67, 0.22);
-      transition: transform 0.14s ease;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.9rem;
+      text-transform: uppercase;
     }
 
-    .tap-zone-wrap:active .tne-digital-card {
-      transform: scale(0.96);
+    .btn-small {
+      background: #2563EB;
+      color: #FFFFFF;
+      border: none;
+      border-radius: 8px;
+      padding: 0 14px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      cursor: pointer;
+      min-height: 44px;
+    }
+
+    .chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .uid-chip {
+      background: #334155;
+      color: #E2E8F0;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      font-family: ui-monospace, monospace;
+      cursor: pointer;
+    }
+
+    /* Contenido Principal */
+    main {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* Tarjeta de Saldo y Estado */
+    .tne-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
     }
 
     .tne-card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-weight: 800;
-      font-size: 1.05rem;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 10px;
     }
 
-    .tne-card-uid {
-      font-family: var(--font-mono);
-      font-size: 0.7rem;
-      color: #CBD5E1;
+    .uid-badge {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      padding: 4px 10px;
+      border-radius: 6px;
+      color: var(--navy-header);
       font-variant-numeric: tabular-nums;
     }
 
-    .tne-card-footer {
-      font-size: 0.58rem;
-      letter-spacing: 0.07em;
-      color: #93C5FD;
-      text-transform: uppercase;
+    .status-pill {
+      font-size: 0.75rem;
       font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      text-transform: uppercase;
+    }
+
+    .status-pill.ok {
+      background: var(--green-bg);
+      color: var(--green-ok);
+    }
+
+    .status-pill.err {
+      background: var(--red-bg);
+      color: var(--red-err);
+    }
+
+    .balance-block {
       display: flex;
       justify-content: space-between;
+      align-items: baseline;
     }
 
-    .reader-hint {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: var(--blue-primary);
-      background: var(--blue-soft);
-      padding: 7px 14px;
-      border-radius: 999px;
-      margin-bottom: 12px;
+    .balance-label {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
 
-    /* Botones de Recarga Rápida en Pantalla Principal */
-    .quick-topup-bar {
-      width: 100%;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .chip-btn {
-      min-height: 38px;
-      border-radius: 8px;
-      border: 1px solid var(--border-light);
-      background: #FFFFFF;
-      color: var(--text-main);
-      font-size: 0.8rem;
-      font-weight: 700;
-      cursor: pointer;
+    .balance-value {
+      font-size: clamp(2rem, 7vw, 2.5rem);
+      font-weight: 800;
+      color: var(--text-primary);
       font-variant-numeric: tabular-nums;
-      transition: background-color 0.15s ease;
+      letter-spacing: -0.02em;
     }
 
-    .chip-btn:hover {
-      background: var(--blue-soft);
-      border-color: #BFDBFE;
-      color: var(--blue-primary);
+    .fare-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-variant-numeric: tabular-nums;
     }
 
-    /* Círculos grandes de Éxito (Verde) y Error (Rojo) */
-    .result-circle {
-      width: 82px;
-      height: 82px;
+    /* Pantallas de Estado del Validador (4 Estados Figma) */
+    .validator-stage {
+      background: var(--bg-surface);
+      border: 2px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 24px 18px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 220px;
+      gap: 12px;
+      transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .validator-stage.state-espera {
+      border-color: #93C5FD;
+      background: #FFFFFF;
+    }
+
+    .validator-stage.state-aprobado {
+      background: var(--green-bg);
+      border-color: var(--green-ok);
+    }
+
+    .validator-stage.state-rechazado {
+      background: var(--red-bg);
+      border-color: var(--red-err);
+    }
+
+    .stage-icon {
+      width: 68px;
+      height: 68px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 6px 0 16px;
+      margin-bottom: 4px;
     }
 
-    .result-circle.green {
-      background-color: var(--green-main);
+    .state-espera .stage-icon {
+      background: #EFF6FF;
+      color: var(--navy-accent);
+      border: 2px solid #BFDBFE;
+    }
+
+    .state-aprobado .stage-icon {
+      background: var(--green-ok);
       color: #FFFFFF;
-      box-shadow: 0 8px 22px rgba(21, 128, 61, 0.25);
     }
 
-    .result-circle.red {
-      background-color: var(--red-soft);
-      color: var(--red-main);
+    .state-rechazado .stage-icon {
+      background: var(--red-err);
+      color: #FFFFFF;
     }
 
-    /* Cajas de información (Pantallas 2, 3 y 4) */
-    .info-box {
-      width: 100%;
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-light);
-      border-radius: 12px;
-      padding: 14px 16px;
-      text-align: left;
-      margin-bottom: 14px;
+    .stage-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--text-primary);
     }
 
-    .info-box-title {
-      font-size: 0.88rem;
-      font-weight: 700;
-      color: var(--text-main);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.82rem;
-      padding: 4px 0;
+    . stage-subtitle {
+      font-size: 0.92rem;
       color: var(--text-secondary);
-      font-variant-numeric: tabular-nums;
+      max-width: 32ch;
+      line-height: 1.4;
     }
 
-    .info-row strong {
-      color: var(--text-main);
-      font-weight: 700;
-    }
-
-    .success-pill-banner {
-      width: 100%;
-      background-color: var(--green-soft);
-      color: var(--green-main);
-      font-weight: 700;
-      font-size: 0.88rem;
-      padding: 12px;
-      border-radius: 10px;
-      margin-bottom: auto;
-    }
-
-    /* Botonera inferior */
-    .bottom-actions {
-      width: 100%;
-      margin-top: auto;
+    /* Botones de Acción y Recarga */
+    .section-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
+      gap: 12px;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .recharge-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
     }
 
-    .btn {
-      width: 100%;
-      min-height: 46px;
+    .btn-recharge {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
       border-radius: 10px;
-      font-family: var(--font-sans);
+      padding: 12px 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--navy-header);
+      cursor: pointer;
+      min-height: 48px;
+      font-variant-numeric: tabular-nums;
+      transition: transform 0.1s ease, background-color 0.15s ease;
+    }
+
+    .btn-recharge:hover, .btn-recharge:focus-visible {
+      background: #E0F2FE;
+      border-color: #0284C7;
+      outline: none;
+    }
+
+    .btn-recharge:active {
+      transform: scale(0.98);
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .btn-primary {
+      background: var(--navy-header);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 10px;
+      padding: 13px 14px;
       font-size: 0.9rem;
       font-weight: 700;
-      display: inline-flex;
+      cursor: pointer;
+      min-height: 48px;
+      display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
+    }
+
+    .btn-primary:hover, .btn-primary:focus-visible {
+      background: var(--navy-accent);
+      outline: 2px solid var(--navy-accent);
+    }
+
+    .btn-secondary {
+      background: #EFF6FF;
+      color: var(--navy-accent);
+      border: 1px solid #BFDBFE;
+      border-radius: 10px;
+      padding: 13px 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
       cursor: pointer;
-      transition: background-color 0.15s ease, transform 0.08s ease;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
 
-    .btn:active { transform: scale(0.99); }
-
-    .btn-primary {
-      background-color: var(--blue-primary);
-      color: #FFFFFF;
-      border: none;
+    /* Historial de Movimientos */
+    .history-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 210px;
+      overflow-y: auto;
     }
-    .btn-primary:hover { background-color: var(--blue-hover); }
 
-    .btn-outline {
-      background-color: #FFFFFF;
-      color: var(--blue-primary);
-      border: 1.5px solid var(--border-light);
-    }
-    .btn-outline:hover { background-color: var(--bg-subtle); }
-
-    .footer-note {
-      width: 100%;
-      border-top: 1px solid var(--border-light);
-      padding-top: 10px;
-      margin-top: 12px;
-      font-size: 0.7rem;
-      color: var(--text-muted);
+    .history-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      padding: 10px 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      font-size: 0.83rem;
       font-variant-numeric: tabular-nums;
     }
 
-    /* Panel de Sincronización con Lector de la Micro (Arduino R4) */
-    .config-drawer {
-      display: none;
-      background: #0F172A;
-      color: #F8FAFC;
-      padding: 14px 16px;
-      border-bottom: 2px solid var(--blue-primary);
-      flex-direction: column;
-      gap: 10px;
-      font-size: 0.8rem;
-    }
-    .config-drawer.open { display: flex; }
-
-    .drawer-row {
+    .history-left {
       display: flex;
-      gap: 6px;
+      flex-direction: column;
+      gap: 2px;
     }
 
-    .drawer-row input {
-      flex: 1;
-      min-height: 36px;
-      border-radius: 6px;
-      border: 1px solid #475569;
-      background: #020617;
-      color: #FFFFFF;
-      padding: 0 10px;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
+    .history-title {
+      font-weight: 700;
+      color: var(--text-primary);
     }
 
-    .drawer-btn {
-      min-height: 36px;
-      border-radius: 6px;
-      border: 1px solid #334155;
-      background: #1E293B;
-      color: #FFFFFF;
+    .history-time {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    .history-amount {
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .history-amount.neg {
+      color: var(--red-err);
+    }
+
+    .history-amount.pos {
+      color: var(--green-ok);
+    }
+
+    footer {
+      padding: 12px 16px;
+      text-align: center;
       font-size: 0.76rem;
-      font-weight: 600;
-      padding: 6px 10px;
-      cursor: pointer;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
     }
-    .drawer-btn.accent { background: #0284C7; border-color: transparent; }
   </style>
 </head>
 <body>
-
   <div class="app-shell">
     <!-- Barra Superior -->
-    <header class="topbar">
-      <div class="topbar-brand">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
-          <line x1="12" y1="18" x2="12.01" y2="18"/>
-        </svg>
-        <span>Mi Pase TNE · App</span>
+    <header class="top-bar">
+      <div class="brand-group">
+        <span class="brand-title">Mi Pase TNE · Valparaíso</span>
+        <span class="brand-subtitle" id="syncIndicator">Conectando a Supabase...</span>
       </div>
-      <button type="button" class="sync-badge" id="btnToggleConfig">
-        SALDO COMPARTIDO ⚙
+      <button type="button" class="btn-config" id="toggleConfigBtn" aria-label="Configurar Tarjeta y Servidor">
+        ⚙ Configurar UID
       </button>
     </header>
 
-    <!-- Panel Desplegable para Pruebas con el Lector Arduino R4 de la Micro -->
+    <!-- Panel Oculto para Cambiar UID de Tarjeta o URL PHP -->
     <section class="config-drawer" id="configDrawer">
-      <div style="display:flex; justify-content:space-between; color:#38BDF8; font-weight:700;">
-        <span>Simulador de Lector de la Micro (RC522)</span>
-        <span id="syncStateLabel">Modo Local</span>
+      <div>
+        <label class="drawer-label" for="uidInput">UID de tu Tarjeta TNE (8 caracteres hexadecimales):</label>
+        <div class="input-row">
+          <input type="text" id="uidInput" class="text-input" maxlength="8" placeholder="Ej: FCDC1198" />
+          <button type="button" class="btn-small" id="saveUidBtn">Vincular</button>
+        </div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-        <button type="button" class="drawer-btn" onclick="procesarPago('Celular NFC')">
-          📱 Pagar con Celular (-$200)
-        </button>
-        <button type="button" class="drawer-btn" onclick="procesarPago('Tarjeta TNE Física')">
-          💳 Pagar con TNE Física (-$200)
-        </button>
-        <button type="button" class="drawer-btn" onclick="mostrarErrorLectura()">
-          ❌ Simular Fallo Lector
-        </button>
-        <button type="button" class="drawer-btn" onclick="recargarSaldoPrompt()">
-          💵 Ingresar Otro Monto
-        </button>
+
+      <div>
+        <span class="drawer-label">Tarjetas rápidas registradas en el laboratorio:</span>
+        <div class="chip-group">
+          <button type="button" class="uid-chip" data-uid="FCDC1198">FCDC1198 (TNE 1)</button>
+          <button type="button" class="uid-chip" data-uid="1C520B29">1C520B29 (TNE 2)</button>
+          <button type="button" class="uid-chip" data-uid="01020304">01020304 (Prueba)</button>
+        </div>
       </div>
-      <div class="drawer-row">
-        <input type="text" id="arduinoIpInput" value="http://192.168.4.1" aria-label="IP del lector Arduino R4">
-        <button type="button" class="drawer-btn accent" id="btnConnectArduino">Conectar R4</button>
+
+      <div>
+        <label class="drawer-label" for="phpUrlInput">Opcional: URL de archivo PHP (dejar vacío para usar Supabase directo):</label>
+        <div class="input-row">
+          <input type="text" id="phpUrlInput" class="text-input" style="text-transform:none;" placeholder="Ej: http://localhost/api.php" />
+          <button type="button" class="btn-small" id="savePhpBtn">Guardar</button>
+        </div>
       </div>
     </section>
 
-    <!-- =========================================================
-         PANTALLA 1: BILLETERA DEL ESTUDIANTE (Pagar en la micro)
-         ========================================================= -->
-    <main class="screen active" id="screen-home">
-      <div class="status-kicker blue">• PASE DIGITAL ACTIVO</div>
-      <h1 class="screen-title">Acerca tu celular al lector</h1>
-      <p class="screen-subtitle">
-        Aproxima el reverso de tu teléfono al validador de la micro para descontar tu pasaje.
-      </p>
-
-      <!-- Tarjeta de Saldo Compartido (Teléfono + TNE Física) -->
-      <div class="shared-wallet-card">
-        <div class="wallet-top">
-          <span class="wallet-label">Saldo Compartido (App + TNE)</span>
-          <span class="linked-pill" id="homeUidBadge">TNE: 01020304</span>
+    <main>
+      <!-- Tarjeta Principal con Saldo en Vivo desde Supabase -->
+      <section class="tne-card" aria-label="Estado de cuenta TNE">
+        <div class="tne-card-header">
+          <span class="uid-badge" id="currentUidLabel">UID: FCDC1198</span>
+          <span class="status-pill ok" id="cardStatusBadge">ACTIVO</span>
         </div>
-        <div class="wallet-balance-row">
-          <span class="wallet-amount" id="homeBalanceAmount">$1.400</span>
-          <span class="wallet-trips" id="homeTripsLeft">7 pasajes escolares</span>
+
+        <div class="balance-block">
+          <span class="balance-label">Saldo Disponible</span>
+          <span class="balance-value" id="balanceDisplay">$1.000</span>
         </div>
-        <div class="wallet-devices">
-          <span>✔ Celular NFC habilitado</span>
-          <span>✔ TNE física sincronizada</span>
+
+        <div class="fare-meta">
+          <span>Tarifa Escolar: <strong>$200 CLP</strong></span>
+          <span id="tripsLeftLabel">Viajes disponibles: 5</span>
         </div>
-      </div>
+      </section>
 
-      <!-- Ilustración TNE Digital que emite señal hacia el validador de la micro -->
-      <div class="tap-zone-wrap" onclick="procesarPago('Celular NFC')" title="Toca aquí al acercar el celular al lector de la micro">
-        <svg class="nfc-waves-top" viewBox="0 0 80 32" fill="none">
-          <path d="M10 22 C26 6, 54 6, 70 22" stroke="#93C5FD" stroke-width="2.2" stroke-linecap="round"/>
-          <path d="M18 26 C30 14, 50 14, 62 26" stroke="#3B82F6" stroke-width="2.6" stroke-linecap="round"/>
-          <path d="M26 30 C34 22, 46 22, 54 30" stroke="#155EEF" stroke-width="3" stroke-linecap="round"/>
-        </svg>
-        <div class="tne-digital-card">
-          <div class="tne-card-header">
-            <span>TNE</span>
-            <span style="font-size: 0.7rem; background: rgba(255,255,255,0.18); padding: 2px 6px; border-radius: 4px;">$200</span>
-          </div>
-          <div class="tne-card-uid" id="cardVisualUid">UID VINCULADO: 01020304</div>
-          <div class="tne-card-footer">
-            <span>PASE ESCOLAR DIGITAL</span>
-            <span>NFC )))</span>
-          </div>
+      <!-- Escenario Visual del Validador (Cambia solo cuando pasas la tarjeta en el Arduino) -->
+      <section class="validator-stage state-espera" id="validatorStage" aria-live="polite">
+        <div class="stage-icon" id="stageIcon">
+          <!-- Icono Ondas NFC por defecto -->
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12a10 10 0 0 1 10-10"/>
+            <path d="M2 12a6 6 0 0 1 6-6"/>
+            <path d="M2 12a2 2 0 0 1 2-2"/>
+            <rect x="6" y="8" width="16" height="12" rx="2"/>
+          </svg>
         </div>
-      </div>
+        <h1 class="stage-title" id="stageTitle">Acerca tu TNE al Validador</h1>
+        <p class="stage-subtitle" id="stageSubtitle">
+          Pasa tu tarjeta física por el lector del Arduino o paga desde aquí. El saldo se actualiza automáticamente.
+        </p>
+      </section>
 
-      <div class="reader-hint">
-        ↑ Acerca la parte superior del celular al validador
-      </div>
+      <!-- Recarga de Saldo Directa a Supabase (Sin usar 'R' en el monitor serial) -->
+      <section class="section-card">
+        <h2 class="section-title">Recargar Saldo en la Nube</h2>
+        <div class="recharge-grid">
+          <button type="button" class="btn-recharge" data-monto="1000">+$1.000</button>
+          <button type="button" class="btn-recharge" data-monto="2000">+$2.000</button>
+          <button type="button" class="btn-recharge" data-monto="5000">+$5.000</button>
+        </div>
 
-      <!-- Botones de Recarga Rápida de Saldo Compartido -->
-      <div class="quick-topup-bar">
-        <button type="button" class="chip-btn" onclick="cargarSaldo(1000)">+$1.000</button>
-        <button type="button" class="chip-btn" onclick="cargarSaldo(2000)">+$2.000</button>
-        <button type="button" class="chip-btn" onclick="cargarSaldo(5000)">+$5.000</button>
-      </div>
+        <div class="action-grid">
+          <button type="button" class="btn-primary" id="payWebBtn">
+            Pagar Pasaje (-$200)
+          </button>
+          <button type="button" class="btn-secondary" id="scanNfcBtn">
+            Leer NFC con Celular
+          </button>
+        </div>
+      </section>
 
-      <div class="bottom-actions">
-        <button type="button" class="btn btn-primary" onclick="procesarPago('Celular NFC')">
-          📡 Pagar en lector con mi celular (-$200)
-        </button>
-        <button type="button" class="btn btn-outline" onclick="showScreen('vincular')">
-          💳 Vincular mi TNE física / Ver QR
-        </button>
-      </div>
-
-      <div class="footer-note">
-        <span id="footerStatusText">NFC activo · Descuento automático en TNE y App</span>
-        <span id="lastUsedBadge">Tarifa: $200</span>
-      </div>
+      <!-- Historial de Cobros y Recargas -->
+      <section class="section-card">
+        <h2 class="section-title">Actividad en Tiempo Real</h2>
+        <ul class="history-list" id="historyList">
+          <li class="history-item">
+            <div class="history-left">
+              <span class="history-title">Sincronización iniciada</span>
+              <span class="history-time">Esperando lectura en Arduino o Web...</span>
+            </div>
+            <span class="history-amount">---</span>
+          </li>
+        </ul>
+      </section>
     </main>
 
-    <!-- =========================================================
-         PANTALLA 2: VINCULAR TNE FÍSICA Y QR DE CUENTA
-         ========================================================= -->
-    <section class="screen" id="screen-vincular">
-      <div class="status-kicker blue">• SINCRONIZACIÓN DE TARJETA</div>
-      <h2 class="screen-title">Vincular TNE física</h2>
-      <p class="screen-subtitle">
-        Escanea tu TNE plástica detrás de tu celular para que ambos compartan el mismo saldo.
-      </p>
-
-      <div class="info-box">
-        <div class="info-box-title">🔗 Estado de tu cuenta vinculada</div>
-        <div class="info-row">
-          <span>UID TNE Física asociada</span>
-          <strong id="linkedUidText">01020304</strong>
-        </div>
-        <div class="info-row">
-          <span>Saldo compartido actual</span>
-          <strong id="linkedBalanceText">$1.400</strong>
-        </div>
-        <div class="info-row">
-          <span>Descuento al usar TNE física</span>
-          <strong>Automático (-$200)</strong>
-        </div>
-      </div>
-
-      <button type="button" class="btn btn-primary" id="btnScanPhysicalTne" style="margin-bottom: 10px;">
-        📡 Escanear mi tarjeta TNE por NFC
-      </button>
-      <button type="button" class="btn btn-outline" id="btnManualUid" style="margin-bottom: 14px;">
-        ✏️ Escribir código UID de mi TNE
-      </button>
-
-      <div class="info-box" style="text-align: center;">
-        <div style="font-size: 0.78rem; font-weight: 700; margin-bottom: 6px;">
-          Código QR de tu cuenta (Respaldo en cabina)
-        </div>
-        <svg width="110" height="110" viewBox="0 0 120 120" style="margin: 0 auto; display: block;">
-          <rect width="120" height="120" fill="#FFFFFF"/>
-          <path d="M10,10 h30 v30 h-30 z M15,15 v20 h20 v-20 z M20,20 h10 v10 h-10 z
-                   M80,10 h30 v30 h-30 z M85,15 v20 h20 v-20 z M90,20 h10 v10 h-10 z
-                   M10,80 h30 v30 h-30 z M15,85 v20 h20 v-20 z M20,90 h10 v10 h-10 z
-                   M50,10 h10 v10 h-10 z M65,15 h10 v15 h-10 z M45,25 h15 v10 h-15 z
-                   M30,45 h20 v15 h-20 z M55,45 h15 v20 h-15 z M75,48 h15 v10 h-15 z
-                   M45,70 h25 v10 h-25 z M80,68 h20 v12 h-20 z M48,88 h15 v22 h-15 z" fill="#0F172A"/>
-        </svg>
-      </div>
-
-      <div class="bottom-actions">
-        <button type="button" class="btn btn-outline" onclick="showScreen('home')">
-          ← Volver a mi pase digital
-        </button>
-      </div>
-    </section>
-
-    <!-- =========================================================
-         PANTALLA 3: PAGO APROBADO (Con Celular o con TNE Física)
-         ========================================================= -->
-    <section class="screen" id="screen-aprobado">
-      <div class="status-kicker green">• VALIDACIÓN EN MICRO COMPLETADA</div>
-
-      <div class="result-circle green">
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-      </div>
-
-      <h2 class="screen-title green">Pago aprobado</h2>
-      <p class="screen-subtitle">Se descontaron $200 de tu saldo compartido.</p>
-
-      <div class="info-box">
-        <div class="info-box-title">
-          <span>🎓</span>
-          <span>Tarifa estudiante TNE (-$200)</span>
-        </div>
-        <div class="info-row">
-          <span>Medio utilizado en el lector</span>
-          <strong id="approvedDeviceUsed">Celular NFC</strong>
-        </div>
-        <div class="info-row">
-          <span>TNE vinculada</span>
-          <strong id="approvedUidUsed">01020304</strong>
-        </div>
-        <div class="info-row">
-          <span>Nuevo saldo compartido</span>
-          <strong id="approvedNewBalance" style="color: var(--green-main);">$1.200</strong>
-        </div>
-        <div class="info-row">
-          <span>Estado del viaje</span>
-          <strong>Confirmado</strong>
-        </div>
-      </div>
-
-      <div class="success-pill-banner">
-        Puedes continuar. ¡Buen viaje! (<span id="returnCountdown">3</span>s)
-      </div>
-
-      <div class="bottom-actions">
-        <button type="button" class="btn btn-outline" onclick="showScreen('home')">
-          Volver al inicio ahora
-        </button>
-      </div>
-
-      <div class="footer-note">
-        <span>Sincronizado con tu TNE física</span>
-        <span id="approvedTimeLabel">12:00:00</span>
-      </div>
-    </section>
-
-    <!-- =========================================================
-         PANTALLA 4: PAGO NO REALIZADO (Saldo insuficiente o fallo)
-         ========================================================= -->
-    <section class="screen" id="screen-rechazado">
-      <div class="status-kicker red">• VALIDACIÓN RECHAZADA</div>
-
-      <div class="result-circle red">
-        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </div>
-
-      <h2 class="screen-title red">Pago no realizado</h2>
-      <p class="screen-subtitle" id="rejectedReasonText">
-        Tu saldo compartido es insuficiente para cubrir el pasaje escolar ($200).
-      </p>
-
-      <div class="info-box">
-        <div class="info-box-title" id="rejectedHelpTitle">Recarga tu cuenta en un toque</div>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;" id="rejectedHelpDesc">
-          Al cargar saldo en la app, quedará disponible inmediatamente tanto para pagar con tu celular como con tu TNE física.
-        </p>
-      </div>
-
-      <div class="bottom-actions">
-        <button type="button" class="btn btn-primary" onclick="cargarYReintentar(1000)">
-          ➕ Cargar $1.000 ahora y volver
-        </button>
-        <button type="button" class="btn btn-outline" onclick="showScreen('home')">
-          ↻ Reintentar con el celular
-        </button>
-      </div>
-
-      <div class="footer-note">
-        <span>Cuenta Estudiante TNE</span>
-        <span id="rejectedBalanceFooter">Saldo actual: $0</span>
-      </div>
-    </section>
+    <footer id="footerMessage">
+      Conectado a Supabase (yrbdxblbeezqqlubbxcf.supabase.co) · Proyecto Validador TNE
+    </footer>
   </div>
 
   <script>
-    const STORAGE_KEY = 'tne_shared_account_v3';
-    const FARE_CLP = 200;
-    let autoTimer = null;
-    let countInterval = null;
-    let r4Poller = null;
+    // =========================================================================
+    // 1. CREDENCIALES EXACTAS DEL ARDUINO DE TU AMIGO (SUPABASE)
+    // =========================================================================
+    const SUPABASE_URL = "https://yrbdxblbeezqqlubbxcf.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_cNpSzGUBVe0trfYXppsgRg_mWHzJafw";
+    const TARIFA_ESCOLAR = 200;
 
-    let state = loadState();
+    // Estado persistente en el navegador
+    let state = {
+      uid: localStorage.getItem("tne_uid_activo") || "FCDC1198",
+      saldo: null,
+      estado: "Activo",
+      phpProxyUrl: localStorage.getItem("tne_php_url") || "",
+      bloqueoCobro: false,
+      historial: JSON.parse(localStorage.getItem("tne_historial_web") || "[]")
+    };
 
-    function loadState() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { uid: '01020304', balance: 1400, lastTap: 0 };
-        const parsed = JSON.parse(raw);
-        return {
-          uid: typeof parsed.uid === 'string' ? sanitizeHex(parsed.uid) : '01020304',
-          balance: Number.isFinite(parsed.balance) && parsed.balance >= 0 ? Math.floor(parsed.balance) : 1400,
-          lastTap: 0
-        };
-      } catch {
-        return { uid: '01020304', balance: 1400, lastTap: 0 };
-      }
-    }
+    // Referencias DOM
+    const syncIndicator = document.getElementById("syncIndicator");
+    const currentUidLabel = document.getElementById("currentUidLabel");
+    const cardStatusBadge = document.getElementById("cardStatusBadge");
+    const balanceDisplay = document.getElementById("balanceDisplay");
+    const tripsLeftLabel = document.getElementById("tripsLeftLabel");
+    const validatorStage = document.getElementById("validatorStage");
+    const stageIcon = document.getElementById("stageIcon");
+    const stageTitle = document.getElementById("stageTitle");
+    const stageSubtitle = document.getElementById("stageSubtitle");
+    const historyList = document.getElementById("historyList");
+    const footerMessage = document.getElementById("footerMessage");
 
-    function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    // Inicializar inputs del panel
+    document.getElementById("uidInput").value = state.uid;
+    document.getElementById("phpUrlInput").value = state.phpProxyUrl;
 
-    function sanitizeHex(str) {
-      const hex = String(str).toUpperCase().replace(/[^0-9A-F]/g, '');
-      return hex.length >= 4 ? hex.slice(0, 20) : '01020304';
-    }
-
-    function formatCLP(val) {
-      return '$' + Number(val).toLocaleString('es-CL');
-    }
-
-    function playSound(approved) {
+    // =========================================================================
+    // 2. SONIDOS SINTETIZADOS (IGUAL AL VALIDADOR FÍSICO)
+    // =========================================================================
+    function reproducirSonido(aprobado) {
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         const ctx = new AudioCtx();
-        if (approved) {
+        if (aprobado) {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.type = 'sine';
+          osc.type = "sine";
           osc.frequency.setValueAtTime(2100, ctx.currentTime);
-          gain.gain.setValueAtTime(0.25, ctx.currentTime);
+          gain.gain.setValueAtTime(0.18, ctx.currentTime);
           osc.connect(gain);
           gain.connect(ctx.destination);
           osc.start();
           osc.stop(ctx.currentTime + 0.18);
         } else {
-          [0, 0.22].forEach(offset => {
+          [0, 0.22].forEach((offset) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
-            osc.type = 'sawtooth';
+            osc.type = "sawtooth";
             osc.frequency.setValueAtTime(340, ctx.currentTime + offset);
-            gain.gain.setValueAtTime(0.25, ctx.currentTime + offset);
+            gain.gain.setValueAtTime(0.18, ctx.currentTime + offset);
             osc.connect(gain);
             gain.connect(ctx.destination);
             osc.start(ctx.currentTime + offset);
             osc.stop(ctx.currentTime + offset + 0.16);
           });
         }
-      } catch {}
+      } catch (e) {}
     }
 
-    function renderUI() {
-      const trips = Math.floor(state.balance / FARE_CLP);
-      document.getElementById('homeUidBadge').textContent = `TNE: ${state.uid}`;
-      document.getElementById('cardVisualUid').textContent = `UID VINCULADO: ${state.uid}`;
-      document.getElementById('homeBalanceAmount').textContent = formatCLP(state.balance);
-      document.getElementById('homeTripsLeft').textContent = `${trips} ${trips === 1 ? 'pasaje escolar' : 'pasajes escolares'}`;
-
-      document.getElementById('linkedUidText').textContent = state.uid;
-      document.getElementById('linkedBalanceText').textContent = formatCLP(state.balance);
-      document.getElementById('approvedUidUsed').textContent = state.uid;
-      document.getElementById('approvedNewBalance').textContent = formatCLP(state.balance);
-      document.getElementById('rejectedBalanceFooter').textContent = `Saldo actual: ${formatCLP(state.balance)}`;
+    // =========================================================================
+    // 3. INTERFAZ VISUAL (ESTADOS DE VALIDACIÓN Y SALDO)
+    // =========================================================================
+    function formatearPesos(valor) {
+      const n = Number(valor) || 0;
+      return "$" + n.toLocaleString("es-CL");
     }
 
-    function showScreen(name) {
-      clearTimeout(autoTimer);
-      clearInterval(countInterval);
+    function registrarMovimiento(titulo, monto, saldoFinal) {
+      const item = {
+        hora: new Date().toLocaleTimeString("es-CL"),
+        titulo,
+        monto,
+        saldoFinal
+      };
+      state.historial.unshift(item);
+      state.historial = state.historial.slice(0, 20);
+      localStorage.setItem("tne_historial_web", JSON.stringify(state.historial));
+      renderizarHistorial();
+    }
 
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-      const target = document.getElementById(`screen-${name}`);
-      if (target) target.classList.add('active');
+    function renderizarHistorial() {
+      if (!state.historial.length) return;
+      historyList.innerHTML = state.historial.map((mov) => {
+        const esPositivo = mov.monto > 0;
+        const claseMonto = esPositivo ? "pos" : "neg";
+        const signo = esPositivo ? "+" : "";
+        return `
+          <li class="history-item">
+            <div class="history-left">
+              <span class="history-title">${mov.titulo}</span>
+              <span class="history-time">${mov.hora} · Restan ${formatearPesos(mov.saldoFinal)}</span>
+            </div>
+            <span class="history-amount ${claseMonto}">${signo}${formatearPesos(mov.monto)}</span>
+          </li>
+        `;
+      }).join("");
+    }
 
-      renderUI();
+    function actualizarTarjetaUI() {
+      currentUidLabel.textContent = `UID: ${state.uid}`;
+      const saldoActual = state.saldo !== null ? state.saldo : 0;
+      balanceDisplay.textContent = formatearPesos(saldoActual);
+      const viajes = Math.max(0, Math.floor(saldoActual / TARIFA_ESCOLAR));
+      tripsLeftLabel.textContent = `Viajes disponibles: ${viajes}`;
 
-      if (name === 'aprobado') {
-        let secs = 3;
-        const cd = document.getElementById('returnCountdown');
-        cd.textContent = secs;
-        countInterval = setInterval(() => {
-          secs -= 1;
-          if (secs > 0) cd.textContent = secs;
-        }, 1000);
-        autoTimer = setTimeout(() => showScreen('home'), 3000);
+      if (state.estado === "Activo" && saldoActual >= TARIFA_ESCOLAR) {
+        cardStatusBadge.textContent = "ACTIVO";
+        cardStatusBadge.className = "status-pill ok";
+      } else if (state.estado !== "Activo") {
+        cardStatusBadge.textContent = state.estado.toUpperCase();
+        cardStatusBadge.className = "status-pill err";
+      } else {
+        cardStatusBadge.textContent = "SIN SALDO";
+        cardStatusBadge.className = "status-pill err";
       }
     }
 
-    // Descuenta del saldo compartido, ya sea que pague con el Celular o con la TNE Física
-    function procesarPago(medioUtilizado = 'Celular NFC') {
-      const now = Date.now();
-      if (now - state.lastTap < 2500) return;
+    let temporizadorPantalla = null;
+    function mostrarEstadoValidador(tipo, titulo, subtitulo) {
+      clearTimeout(temporizadorPantalla);
+      validatorStage.className = `validator-stage state-${tipo}`;
+      stageTitle.textContent = titulo;
+      stageSubtitle.textContent = subtitulo;
 
-      if (state.balance < FARE_CLP) {
-        playSound(false);
-        if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
-        document.getElementById('rejectedReasonText').textContent =
-          `Saldo compartido insuficiente (${formatCLP(state.balance)}). Necesitas $200 para validar.`;
-        document.getElementById('rejectedHelpTitle').textContent = 'Recarga tu cuenta compartida';
-        document.getElementById('rejectedHelpDesc').textContent =
-          'Carga saldo desde esta misma app para seguir viajando con tu celular o con tu TNE física.';
-        showScreen('rechazado');
-        return;
+      if (tipo === "aprobado") {
+        stageIcon.innerHTML = `
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>`;
+      } else if (tipo === "rechazado") {
+        stageIcon.innerHTML = `
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>`;
+      } else {
+        stageIcon.innerHTML = `
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><path d="M2 12a2 2 0 0 1 2-2"/><rect x="6" y="8" width="16" height="12" rx="2"/>
+          </svg>`;
       }
 
-      state.balance -= FARE_CLP;
-      state.lastTap = now;
-      saveState();
-
-      document.getElementById('approvedDeviceUsed').textContent = medioUtilizado;
-      document.getElementById('approvedTimeLabel').textContent = new Date().toLocaleTimeString('es-CL');
-      document.getElementById('lastUsedBadge').textContent = `Último pago: ${medioUtilizado}`;
-
-      playSound(true);
-      if (navigator.vibrate) navigator.vibrate(130);
-      showScreen('aprobado');
-    }
-
-    function mostrarErrorLectura() {
-      playSound(false);
-      if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
-      document.getElementById('rejectedReasonText').textContent =
-        'El lector de la micro no alcanzó a leer tu pase. Acércalo nuevamente.';
-      document.getElementById('rejectedHelpTitle').textContent = 'Mantén el celular o TNE 1 segundo';
-      document.getElementById('rejectedHelpDesc').textContent =
-        'Acerca la parte superior del teléfono al lector RC522 de la micro hasta escuchar el bip.';
-      showScreen('rechazado');
-    }
-
-    function cargarSaldo(monto) {
-      const val = Math.floor(Number(monto));
-      if (!Number.isFinite(val) || val <= 0) return;
-      state.balance += val;
-      saveState();
-      renderUI();
-      playSound(true);
-      document.getElementById('footerStatusText').textContent =
-        `✔ Recarga de ${formatCLP(val)} aplicada en App y TNE`;
-
-      // Si está conectado al Arduino R4 de la micro, le sincroniza el nuevo saldo compartido
-      const ip = document.getElementById('arduinoIpInput').value.trim().replace(/\/$/, '');
-      if (r4Poller) {
-        fetch(`${ip}/saldo?valor=${state.balance}`).catch(() => {});
+      if (tipo !== "espera") {
+        temporizadorPantalla = setTimeout(() => {
+          mostrarEstadoValidador(
+            "espera",
+            "Acerca tu TNE al Validador",
+            "Pasa tu tarjeta física por el lector del Arduino o paga desde aquí."
+          );
+        }, 3000);
       }
     }
 
-    function cargarYReintentar(monto) {
-      cargarSaldo(monto);
-      showScreen('home');
-    }
+    // =========================================================================
+    // 4. CONEXIÓN A SUPABASE (Y COMPATIBILIDAD CON SERVIDOR PHP)
+    // =========================================================================
+    const headersSupabase = {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json"
+    };
 
-    function recargarSaldoPrompt() {
-      const monto = prompt('¿Cuánto saldo deseas cargar a tu cuenta compartida TNE?', '1000');
-      if (monto) cargarSaldo(monto);
-    }
+    // 4.1 Consultar el saldo en vivo (Detecta si pasaste la tarjeta en el Arduino)
+    async function consultarSaldoEnNube() {
+      try {
+        let datosTarjeta = null;
 
-    // Escanear la TNE física con la antena NFC del celular para vincularla
-    async function escanearTneFisica() {
-      if (!('NDEFReader' in window)) {
-        const manual = prompt('Ingresa el código UID de tu TNE física (ej. 01020304):', state.uid);
-        if (manual) {
-          state.uid = sanitizeHex(manual);
-          saveState();
-          renderUI();
+        if (state.phpProxyUrl) {
+          // Si tu amigo configuró un endpoint PHP intermedio
+          const resPhp = await fetch(`${state.phpProxyUrl}?accion=consultar&card_uid=${encodeURIComponent(state.uid)}`, { cache: "no-store" });
+          datosTarjeta = await resPhp.json();
+        } else {
+          // Consulta directa a la tabla 'tarjetas_autorizadas' de Supabase
+          const url = `${SUPABASE_URL}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}&select=uid,estado,saldo`;
+          const res = await fetch(url, { headers: headersSupabase, cache: "no-store" });
+          const lista = await res.json();
+          if (Array.isArray(lista) && lista.length > 0) {
+            datosTarjeta = lista[0];
+          }
         }
+
+        if (datosTarjeta && typeof datosTarjeta.saldo === "number") {
+          // Si el saldo bajó en la base de datos significa que acaban de pasar la tarjeta por el Arduino físico
+          if (state.saldo !== null && datosTarjeta.saldo < state.saldo) {
+            const diferencia = datosTarjeta.saldo - state.saldo;
+            reproducirSonido(true);
+            mostrarEstadoValidador(
+              "aprobado",
+              "¡Pago Aprobado en Micro! (-$200)",
+              `Validado en el lector Arduino · Saldo restante: ${formatearPesos(datosTarjeta.saldo)}`
+            );
+            registrarMovimiento("Validación en Arduino (TNE)", diferencia, datosTarjeta.saldo);
+          } else if (state.saldo !== null && datosTarjeta.saldo > state.saldo) {
+            const recarga = datosTarjeta.saldo - state.saldo;
+            registrarMovimiento("Recarga sincronizada", recarga, datosTarjeta.saldo);
+          }
+
+          state.saldo = datosTarjeta.saldo;
+          state.estado = datosTarjeta.estado || "Activo";
+          syncIndicator.textContent = `● En línea con Supabase (${state.uid})`;
+          actualizarTarjetaUI();
+        } else {
+          syncIndicator.textContent = `⚠ UID ${state.uid} no registrado en tabla`;
+          state.estado = "No registrado";
+          actualizarTarjetaUI();
+        }
+      } catch (err) {
+        syncIndicator.textContent = "Reconectando con el servidor...";
+      }
+    }
+
+    // 4.2 Llamar a la función RPC 'recargar_saldo' del SQL de tu amigo
+    async function recargarSaldo(monto) {
+      const valor = parseInt(monto, 10);
+      if (!valor || valor <= 0) return;
+
+      footerMessage.textContent = `Enviando recarga de ${formatearPesos(valor)} al servidor...`;
+      try {
+        let data;
+        if (state.phpProxyUrl) {
+          const res = await fetch(`${state.phpProxyUrl}?accion=recargar`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ card_uid: state.uid, monto: valor })
+          });
+          data = await res.json();
+        } else {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/recargar_saldo`, {
+            method: "POST",
+            headers: headersSupabase,
+            body: JSON.stringify({ card_uid: state.uid, monto: valor })
+          });
+          data = await res.json();
+        }
+
+        if (data && data.status === "exito") {
+          reproducirSonido(true);
+          await consultarSaldoEnNube();
+          mostrarEstadoValidador(
+            "aprobado",
+            `¡Recarga Exitosa! (+${formatearPesos(valor)})`,
+            `Tu nuevo saldo disponible es ${formatearPesos(state.saldo)}`
+          );
+          footerMessage.textContent = `✔ Recarga de ${formatearPesos(valor)} guardada en Supabase.`;
+        } else {
+          reproducirSonido(false);
+          mostrarEstadoValidador(
+            "rechazado",
+            "No se pudo recargar",
+            (data && data.mensaje) ? data.mensaje : `Verifica que el UID ${state.uid} exista en tarjetas_autorizadas.`
+          );
+        }
+      } catch (error) {
+        reproducirSonido(false);
+        footerMessage.textContent = "Error de red al intentar recargar.";
+      }
+    }
+
+    // 4.3 Llamar a la función RPC 'descontar_saldo' (Exactamente igual que el Arduino)
+    async function descontarSaldoDesdeWeb(origen = "Pago desde Web/App") {
+      if (state.bloqueoCobro) return;
+      state.bloqueoCobro = true;
+      setTimeout(() => { state.bloqueoCobro = false; }, 2500);
+
+      try {
+        let data;
+        if (state.phpProxyUrl) {
+          const res = await fetch(`${state.phpProxyUrl}?accion=descontar`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ card_uid: state.uid })
+          });
+          data = await res.json();
+        } else {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/descontar_saldo`, {
+            method: "POST",
+            headers: headersSupabase,
+            body: JSON.stringify({ card_uid: state.uid })
+          });
+          data = await res.json();
+        }
+
+        if (data && data.status === "concedido") {
+          state.saldo = data.saldo_restante;
+          actualizarTarjetaUI();
+          reproducirSonido(true);
+          registrarMovimiento(origen, -TARIFA_ESCOLAR, data.saldo_restante);
+          mostrarEstadoValidador(
+            "aprobado",
+            "¡Pago Aprobado! (-$200)",
+            `Acceso concedido · Saldo restante: ${formatearPesos(data.saldo_restante)}`
+          );
+        } else {
+          reproducirSonido(false);
+          const motivo = (data && data.mensaje) ? data.mensaje : "Saldo insuficiente o tarjeta inactiva";
+          mostrarEstadoValidador("rechazado", "Acceso Denegado", motivo);
+          consultarSaldoEnNube();
+        }
+      } catch (error) {
+        reproducirSonido(false);
+        mostrarEstadoValidador("rechazado", "Error de Conexión", "No se pudo contactar con el servidor.");
+      }
+    }
+
+    // =========================================================================
+    // 5. LECTURA NFC DESDE EL CELULAR (CHROME ANDROID) Y EVENTOS DE BOTONES
+    // =========================================================================
+    document.getElementById("toggleConfigBtn").addEventListener("click", () => {
+      document.getElementById("configDrawer").classList.toggle("open");
+    });
+
+    function cambiarUidActivo(nuevoUid) {
+      const limpio = nuevoUid.toUpperCase().replace(/[^0-9A-F]/g, "");
+      if (limpio.length !== 8) {
+        alert("El código del Arduino exige que el UID tenga exactamente 8 caracteres hexadecimales (ej: FCDC1198).");
         return;
       }
+      state.uid = limpio;
+      state.saldo = null;
+      localStorage.setItem("tne_uid_activo", limpio);
+      document.getElementById("uidInput").value = limpio;
+      actualizarTarjetaUI();
+      consultarSaldoEnNube();
+    }
 
+    document.getElementById("saveUidBtn").addEventListener("click", () => {
+      cambiarUidActivo(document.getElementById("uidInput").value);
+    });
+
+    document.querySelectorAll(".uid-chip").forEach((chip) => {
+      chip.addEventListener("click", () => cambiarUidActivo(chip.dataset.uid));
+    });
+
+    document.getElementById("savePhpBtn").addEventListener("click", () => {
+      state.phpProxyUrl = document.getElementById("phpUrlInput").value.trim();
+      localStorage.setItem("tne_php_url", state.phpProxyUrl);
+      footerMessage.textContent = state.phpProxyUrl
+        ? `Usando servidor PHP: ${state.phpProxyUrl}`
+        : "Conectado directamente a Supabase.";
+      consultarSaldoEnNube();
+    });
+
+    document.querySelectorAll(".btn-recharge").forEach((btn) => {
+      btn.addEventListener("click", () => recargarSaldo(btn.dataset.monto));
+    });
+
+    document.getElementById("payWebBtn").addEventListener("click", () => {
+      descontarSaldoDesdeWeb("Validación en App (-$200)");
+    });
+
+    document.getElementById("scanNfcBtn").addEventListener("click", async () => {
+      if (!("NDEFReader" in window)) {
+        alert("Para escanear la tarjeta física con el teléfono, abre esta página en Google Chrome para Android con el NFC activado.");
+        return;
+      }
       try {
         const ndef = new NDEFReader();
         await ndef.scan();
-        document.getElementById('footerStatusText').textContent = 'Acerca tu TNE física al reverso del celular...';
-
+        footerMessage.textContent = "Acerca tu tarjeta TNE a la parte trasera de tu celular...";
         ndef.onreading = (event) => {
-          const serial = sanitizeHex(event.serialNumber || '');
-          if (serial) {
-            state.uid = serial;
-            saveState();
-            renderUI();
-            playSound(true);
-            alert(`¡TNE física (${state.uid}) vinculada a tu saldo compartido!`);
-            showScreen('home');
+          const uidHex = event.serialNumber.replace(/:/g, "").toUpperCase();
+          if (uidHex.length === 8) {
+            cambiarUidActivo(uidHex);
+            footerMessage.textContent = `✔ Tarjeta detectada por NFC: ${uidHex}`;
+          } else {
+            footerMessage.textContent = `UID leído (${uidHex}). Recuerda que el Arduino valida UIDs de 8 caracteres.`;
           }
         };
-      } catch {
-        alert('Activa el NFC en los ajustes de tu teléfono Android.');
-      }
-    }
-
-    // Sincronización en vivo con el Arduino UNO R4 WiFi (Validador de la micro)
-    document.getElementById('btnConnectArduino').addEventListener('click', () => {
-      const ip = document.getElementById('arduinoIpInput').value.trim().replace(/\/$/, '');
-      const btn = document.getElementById('btnConnectArduino');
-
-      if (r4Poller) {
-        clearInterval(r4Poller);
-        r4Poller = null;
-        btn.textContent = 'Conectar R4';
-        document.getElementById('syncStateLabel').textContent = 'Modo Local';
-        return;
-      }
-
-      btn.textContent = 'Sincronizado ✔';
-      document.getElementById('syncStateLabel').textContent = 'Conectado al Lector';
-      document.getElementById('configDrawer').classList.remove('open');
-
-      r4Poller = setInterval(async () => {
-        try {
-          const res = await fetch(`${ip}/estado`, { cache: 'no-store' });
-          const data = await res.json();
-          // data = { evento: "PAGO_CELULAR" | "PAGO_TNE", saldo: 1200 }
-          if (data.evento === 'PAGO_CELULAR') {
-            state.balance = data.saldo;
-            saveState();
-            procesarPago('Celular NFC');
-          } else if (data.evento === 'PAGO_TNE') {
-            state.balance = data.saldo;
-            saveState();
-            procesarPago('Tarjeta TNE Física');
-          } else if (data.evento === 'RECHAZADO') {
-            mostrarErrorLectura();
-          }
-        } catch {}
-      }, 400);
-    });
-
-    document.getElementById('btnToggleConfig').addEventListener('click', () => {
-      document.getElementById('configDrawer').classList.toggle('open');
-    });
-
-    document.getElementById('btnScanPhysicalTne').addEventListener('click', escanearTneFisica);
-
-    document.getElementById('btnManualUid').addEventListener('click', () => {
-      const nuevo = prompt('Ingresa el UID de tu tarjeta TNE (ej. 01020304):', state.uid);
-      if (nuevo) {
-        state.uid = sanitizeHex(nuevo);
-        saveState();
-        renderUI();
+      } catch (err) {
+        footerMessage.textContent = "No se pudo activar el lector NFC del teléfono.";
       }
     });
 
-    renderUI();
+    // Iniciar vista y sincronización automática cada 1.5 segundos
+    renderizarHistorial();
+    actualizarTarjetaUI();
+    consultarSaldoEnNube();
+    setInterval(consultarSaldoEnNube, 1500);
   </script>
 </body>
 </html>
