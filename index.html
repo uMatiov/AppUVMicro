@@ -750,269 +750,266 @@
   </div>
 
   <script>
-  const STORAGE_KEY = 'tne_shared_account_v3';
-  const FARE_CLP = 200;
-  const UID_CELULAR = '08A1B2C3'; // simula el UID aleatorio de un Android (empieza con 08)
-  let autoTimer = null, countInterval = null, poller = null, online = false, sincronizando = false;
+    const STORAGE_KEY = 'tne_shared_account_v3';
+    const FARE_CLP = 200;
+    let autoTimer = null;
+    let countInterval = null;
+    let r4Poller = null;
 
-  let serverUrl = (localStorage.getItem('tne_notebook_url') ||
-    (location.protocol.startsWith('http') && location.port === '8080'
-      ? location.origin : 'http://192.168.43.120:8080')).replace(/\/$/, '');
-  document.getElementById('arduinoIpInput').value = serverUrl;
+    let state = loadState();
 
-  let state = loadState();
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { uid: '01020304', balance: 1400, lastTap: 0 };
-      const p = JSON.parse(raw);
-      return {
-        uid: typeof p.uid === 'string' ? sanitizeHex(p.uid) : '01020304',
-        balance: Number.isFinite(p.balance) && p.balance >= 0 ? Math.floor(p.balance) : 1400,
-        lastTap: 0
-      };
-    } catch { return { uid: '01020304', balance: 1400, lastTap: 0 }; }
-  }
-  function saveState() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { console.error(e); }
-  }
-  function sanitizeHex(str) {
-    const hex = String(str).toUpperCase().replace(/[^0-9A-F]/g, '');
-    return hex.length >= 4 ? hex.slice(0, 20) : '01020304';
-  }
-  function formatCLP(v) { return '$' + Number(v).toLocaleString('es-CL'); }
-
-  function playSound(approved) {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const beep = (type, freq, start, dur) => {
-        const osc = ctx.createOscillator(), gain = ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-        gain.gain.setValueAtTime(0.25, ctx.currentTime + start);
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.start(ctx.currentTime + start);
-        osc.stop(ctx.currentTime + start + dur);
-      };
-      if (approved) beep('sine', 2100, 0, 0.18);
-      else { beep('sawtooth', 340, 0, 0.16); beep('sawtooth', 340, 0.22, 0.16); }
-    } catch {}
-  }
-
-  function renderUI() {
-    const trips = Math.floor(state.balance / FARE_CLP);
-    document.getElementById('homeUidBadge').textContent = `TNE: ${state.uid}`;
-    document.getElementById('cardVisualUid').textContent = `UID VINCULADO: ${state.uid}`;
-    document.getElementById('homeBalanceAmount').textContent = formatCLP(state.balance);
-    document.getElementById('homeTripsLeft').textContent =
-      `${trips} ${trips === 1 ? 'pasaje escolar' : 'pasajes escolares'}`;
-    document.getElementById('linkedUidText').textContent = state.uid;
-    document.getElementById('linkedBalanceText').textContent = formatCLP(state.balance);
-    document.getElementById('approvedUidUsed').textContent = state.uid;
-    document.getElementById('approvedNewBalance').textContent = formatCLP(state.balance);
-    document.getElementById('rejectedBalanceFooter').textContent = `Saldo actual: ${formatCLP(state.balance)}`;
-  }
-
-  function showScreen(name) {
-    clearTimeout(autoTimer);
-    clearInterval(countInterval);
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    const target = document.getElementById(`screen-${name}`);
-    if (target) target.classList.add('active');
-    renderUI();
-    if (name === 'aprobado') {
-      let secs = 3;
-      const cd = document.getElementById('returnCountdown');
-      cd.textContent = secs;
-      countInterval = setInterval(() => { secs -= 1; if (secs > 0) cd.textContent = secs; }, 1000);
-      autoTimer = setTimeout(() => showScreen('home'), 3000);
-    }
-  }
-
-  /* ---------- Comunicación con el servidor del notebook ---------- */
-  async function api(path) {
-    const res = await fetch(`${serverUrl}${path}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
-    return res.json();
-  }
-
-  function setOnline(v) {
-    online = v;
-    document.getElementById('syncStateLabel').textContent =
-      v ? 'Conectado al Servidor' : (poller ? 'Servidor sin respuesta' : 'Modo Local');
-  }
-
-  function aplicarDb(db) {
-    if (Number.isFinite(db.saldo)) state.balance = db.saldo;
-    if (db.uid) state.uid = sanitizeHex(db.uid);
-    saveState();
-    renderUI();
-  }
-
-  // Pregunta al servidor qué pasó (pago en micro, recarga, etc.) y muestra la pantalla correspondiente
-  async function sincronizar() {
-    if (sincronizando) return;
-    sincronizando = true;
-    try {
-      const db = await api('/estado?limpiar=1');
-      setOnline(true);
-      aplicarDb(db);
-      switch (db.ultimo_evento) {
-        case 'APROBADO_TNE':     mostrarAprobado('Tarjeta TNE Física (en micro)'); break;
-        case 'APROBADO_CELULAR': mostrarAprobado('Celular NFC (en micro)'); break;
-        case 'SIN_SALDO':        mostrarRechazo('saldo'); break;
-        case 'RECHAZADO_UID':    mostrarRechazo('uid'); break;
-      }
-    } catch { setOnline(false); }
-    finally { sincronizando = false; }
-  }
-
-  function iniciarSync() {
-    clearInterval(poller);
-    poller = setInterval(sincronizar, 600);
-    document.getElementById('btnConnectArduino').textContent = 'Desconectar';
-    sincronizar();
-  }
-  function detenerSync() {
-    clearInterval(poller);
-    poller = null;
-    setOnline(false);
-    document.getElementById('btnConnectArduino').textContent = 'Conectar servidor';
-  }
-
-  /* ---------- Pantallas de resultado ---------- */
-  function mostrarAprobado(medio) {
-    document.getElementById('approvedDeviceUsed').textContent = medio;
-    document.getElementById('approvedTimeLabel').textContent = new Date().toLocaleTimeString('es-CL');
-    document.getElementById('lastUsedBadge').textContent = `Último pago: ${medio}`;
-    playSound(true);
-    if (navigator.vibrate) navigator.vibrate(130);
-    showScreen('aprobado');
-  }
-
-  function mostrarRechazo(tipo) {
-    const t = {
-      saldo: ['Saldo compartido insuficiente (' + formatCLP(state.balance) + '). Necesitas $200 para validar.',
-              'Recarga tu cuenta compartida',
-              'Carga saldo desde esta misma app para seguir viajando con tu celular o con tu TNE física.'],
-      uid:   ['La tarjeta leída no está vinculada a tu cuenta.',
-              'Vincula tu TNE física',
-              'Entra a "Vincular mi TNE física" y registra el UID de tu tarjeta.'],
-      lectura: ['El lector de la micro no alcanzó a leer tu pase. Acércalo nuevamente.',
-              'Mantén el celular o TNE 1 segundo',
-              'Acerca la parte superior del teléfono al lector RC522 de la micro hasta escuchar el bip.']
-    }[tipo];
-    document.getElementById('rejectedReasonText').textContent = t[0];
-    document.getElementById('rejectedHelpTitle').textContent = t[1];
-    document.getElementById('rejectedHelpDesc').textContent = t[2];
-    playSound(false);
-    if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
-    showScreen('rechazado');
-  }
-  function mostrarErrorLectura() { mostrarRechazo('lectura'); }
-
-  /* ---------- Acciones ---------- */
-  async function procesarPago(medio = 'Celular NFC') {
-    const now = Date.now();
-    if (now - state.lastTap < 2500) return;
-    state.lastTap = now;
-
-    if (online) {
+    function loadState() {
       try {
-        const uid = medio === 'Celular NFC' ? UID_CELULAR : state.uid;
-        await api(`/cobrar?uid=${uid}&medio=${encodeURIComponent(medio)}`);
-        await sincronizar(); // el servidor decide; la pantalla se muestra desde ahí
-        return;
-      } catch { /* cae al modo local */ }
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return { uid: '01020304', balance: 1400, lastTap: 0 };
+        const parsed = JSON.parse(raw);
+        return {
+          uid: typeof parsed.uid === 'string' ? sanitizeHex(parsed.uid) : '01020304',
+          balance: Number.isFinite(parsed.balance) && parsed.balance >= 0 ? Math.floor(parsed.balance) : 1400,
+          lastTap: 0
+        };
+      } catch {
+        return { uid: '01020304', balance: 1400, lastTap: 0 };
+      }
     }
 
-    // Modo local (sin servidor)
-    if (state.balance < FARE_CLP) return mostrarRechazo('saldo');
-    state.balance -= FARE_CLP;
-    saveState();
-    mostrarAprobado(medio);
-  }
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        console.error(e);
+      }
+    }
 
-  async function cargarSaldo(monto) {
-    const val = Math.floor(Number(monto));
-    if (!Number.isFinite(val) || val <= 0) return;
-    try {
-      const db = await api(`/recargar?monto=${val}`);
-      aplicarDb(db);
-      setOnline(true);
-      document.getElementById('footerStatusText').textContent =
-        `✔ Recarga de ${formatCLP(val)} guardada en servidor`;
-    } catch {
-      state.balance += val; // respaldo local
+    function sanitizeHex(str) {
+      const hex = String(str).toUpperCase().replace(/[^0-9A-F]/g, '');
+      return hex.length >= 4 ? hex.slice(0, 20) : '01020304';
+    }
+
+    function formatCLP(val) {
+      return '$' + Number(val).toLocaleString('es-CL');
+    }
+
+    function playSound(approved) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        if (approved) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(2100, ctx.currentTime);
+          gain.gain.setValueAtTime(0.25, ctx.currentTime);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.18);
+        } else {
+          [0, 0.22].forEach(offset => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(340, ctx.currentTime + offset);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime + offset);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + offset);
+            osc.stop(ctx.currentTime + offset + 0.16);
+          });
+        }
+      } catch {}
+    }
+
+    function renderUI() {
+      const trips = Math.floor(state.balance / FARE_CLP);
+      document.getElementById('homeUidBadge').textContent = `TNE: ${state.uid}`;
+      document.getElementById('cardVisualUid').textContent = `UID VINCULADO: ${state.uid}`;
+      document.getElementById('homeBalanceAmount').textContent = formatCLP(state.balance);
+      document.getElementById('homeTripsLeft').textContent = `${trips} ${trips === 1 ? 'pasaje escolar' : 'pasajes escolares'}`;
+
+      document.getElementById('linkedUidText').textContent = state.uid;
+      document.getElementById('linkedBalanceText').textContent = formatCLP(state.balance);
+      document.getElementById('approvedUidUsed').textContent = state.uid;
+      document.getElementById('approvedNewBalance').textContent = formatCLP(state.balance);
+      document.getElementById('rejectedBalanceFooter').textContent = `Saldo actual: ${formatCLP(state.balance)}`;
+    }
+
+    function showScreen(name) {
+      clearTimeout(autoTimer);
+      clearInterval(countInterval);
+
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      const target = document.getElementById(`screen-${name}`);
+      if (target) target.classList.add('active');
+
+      renderUI();
+
+      if (name === 'aprobado') {
+        let secs = 3;
+        const cd = document.getElementById('returnCountdown');
+        cd.textContent = secs;
+        countInterval = setInterval(() => {
+          secs -= 1;
+          if (secs > 0) cd.textContent = secs;
+        }, 1000);
+        autoTimer = setTimeout(() => showScreen('home'), 3000);
+      }
+    }
+
+    // Descuenta del saldo compartido, ya sea que pague con el Celular o con la TNE Física
+    function procesarPago(medioUtilizado = 'Celular NFC') {
+      const now = Date.now();
+      if (now - state.lastTap < 2500) return;
+
+      if (state.balance < FARE_CLP) {
+        playSound(false);
+        if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
+        document.getElementById('rejectedReasonText').textContent =
+          `Saldo compartido insuficiente (${formatCLP(state.balance)}). Necesitas $200 para validar.`;
+        document.getElementById('rejectedHelpTitle').textContent = 'Recarga tu cuenta compartida';
+        document.getElementById('rejectedHelpDesc').textContent =
+          'Carga saldo desde esta misma app para seguir viajando con tu celular o con tu TNE física.';
+        showScreen('rechazado');
+        return;
+      }
+
+      state.balance -= FARE_CLP;
+      state.lastTap = now;
+      saveState();
+
+      document.getElementById('approvedDeviceUsed').textContent = medioUtilizado;
+      document.getElementById('approvedTimeLabel').textContent = new Date().toLocaleTimeString('es-CL');
+      document.getElementById('lastUsedBadge').textContent = `Último pago: ${medioUtilizado}`;
+
+      playSound(true);
+      if (navigator.vibrate) navigator.vibrate(130);
+      showScreen('aprobado');
+    }
+
+    function mostrarErrorLectura() {
+      playSound(false);
+      if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
+      document.getElementById('rejectedReasonText').textContent =
+        'El lector de la micro no alcanzó a leer tu pase. Acércalo nuevamente.';
+      document.getElementById('rejectedHelpTitle').textContent = 'Mantén el celular o TNE 1 segundo';
+      document.getElementById('rejectedHelpDesc').textContent =
+        'Acerca la parte superior del teléfono al lector RC522 de la micro hasta escuchar el bip.';
+      showScreen('rechazado');
+    }
+
+    function cargarSaldo(monto) {
+      const val = Math.floor(Number(monto));
+      if (!Number.isFinite(val) || val <= 0) return;
+      state.balance += val;
       saveState();
       renderUI();
+      playSound(true);
       document.getElementById('footerStatusText').textContent =
-        `✔ Recarga de ${formatCLP(val)} (solo local, sin servidor)`;
+        `✔ Recarga de ${formatCLP(val)} aplicada en App y TNE`;
+
+      // Si está conectado al Arduino R4 de la micro, le sincroniza el nuevo saldo compartido
+      const ip = document.getElementById('arduinoIpInput').value.trim().replace(/\/$/, '');
+      if (r4Poller) {
+        fetch(`${ip}/saldo?valor=${state.balance}`).catch(() => {});
+      }
     }
-    playSound(true);
-  }
 
-  async function cargarYReintentar(monto) {
-    await cargarSaldo(monto);
-    showScreen('home');
-  }
-
-  function recargarSaldoPrompt() {
-    const monto = prompt('¿Cuánto saldo deseas cargar a tu cuenta compartida TNE?', '1000');
-    if (monto) cargarSaldo(monto);
-  }
-
-  async function sincronizarUidConServidor(nuevoUid) {
-    state.uid = sanitizeHex(nuevoUid);
-    saveState();
-    renderUI();
-    try {
-      await api(`/vincular?uid=${state.uid}`);
-      document.getElementById('footerStatusText').textContent = `✔ UID ${state.uid} registrado en servidor`;
-    } catch {}
-  }
-
-  async function escanearTneFisica() {
-    if (!('NDEFReader' in window)) {
-      const manual = prompt('Ingresa el código UID de tu TNE física (ej. 01020304):', state.uid);
-      if (manual) sincronizarUidConServidor(manual);
-      return;
+    function cargarYReintentar(monto) {
+      cargarSaldo(monto);
+      showScreen('home');
     }
-    try {
-      const ndef = new NDEFReader();
-      await ndef.scan();
-      document.getElementById('footerStatusText').textContent = 'Acerca tu TNE física al reverso del celular...';
-      ndef.onreading = async (event) => {
-        const serial = sanitizeHex(event.serialNumber || '');
-        if (serial) {
-          await sincronizarUidConServidor(serial);
-          playSound(true);
-          alert(`¡TNE física (${state.uid}) vinculada a tu saldo compartido!`);
-          showScreen('home');
+
+    function recargarSaldoPrompt() {
+      const monto = prompt('¿Cuánto saldo deseas cargar a tu cuenta compartida TNE?', '1000');
+      if (monto) cargarSaldo(monto);
+    }
+
+    // Escanear la TNE física con la antena NFC del celular para vincularla
+    async function escanearTneFisica() {
+      if (!('NDEFReader' in window)) {
+        const manual = prompt('Ingresa el código UID de tu TNE física (ej. 01020304):', state.uid);
+        if (manual) {
+          state.uid = sanitizeHex(manual);
+          saveState();
+          renderUI();
         }
-      };
-    } catch { alert('Activa el NFC en los ajustes de tu teléfono Android.'); }
-  }
+        return;
+      }
 
-  /* ---------- Eventos de UI ---------- */
-  document.getElementById('btnConnectArduino').addEventListener('click', () => {
-    if (poller) { detenerSync(); return; }
-    serverUrl = document.getElementById('arduinoIpInput').value.trim().replace(/\/$/, '');
-    localStorage.setItem('tne_notebook_url', serverUrl);
-    document.getElementById('configDrawer').classList.remove('open');
-    iniciarSync();
-  });
-  document.getElementById('btnToggleConfig').addEventListener('click', () =>
-    document.getElementById('configDrawer').classList.toggle('open'));
-  document.getElementById('btnScanPhysicalTne').addEventListener('click', escanearTneFisica);
-  document.getElementById('btnManualUid').addEventListener('click', () => {
-    const nuevo = prompt('Ingresa el UID de tu tarjeta TNE (ej. 01020304):', state.uid);
-    if (nuevo) sincronizarUidConServidor(nuevo);
-  });
+      try {
+        const ndef = new NDEFReader();
+        await ndef.scan();
+        document.getElementById('footerStatusText').textContent = 'Acerca tu TNE física al reverso del celular...';
 
-  renderUI();
-  iniciarSync(); // se conecta solo al abrir la página
-</script>
+        ndef.onreading = (event) => {
+          const serial = sanitizeHex(event.serialNumber || '');
+          if (serial) {
+            state.uid = serial;
+            saveState();
+            renderUI();
+            playSound(true);
+            alert(`¡TNE física (${state.uid}) vinculada a tu saldo compartido!`);
+            showScreen('home');
+          }
+        };
+      } catch {
+        alert('Activa el NFC en los ajustes de tu teléfono Android.');
+      }
+    }
+
+    // Sincronización en vivo con el Arduino UNO R4 WiFi (Validador de la micro)
+    document.getElementById('btnConnectArduino').addEventListener('click', () => {
+      const ip = document.getElementById('arduinoIpInput').value.trim().replace(/\/$/, '');
+      const btn = document.getElementById('btnConnectArduino');
+
+      if (r4Poller) {
+        clearInterval(r4Poller);
+        r4Poller = null;
+        btn.textContent = 'Conectar R4';
+        document.getElementById('syncStateLabel').textContent = 'Modo Local';
+        return;
+      }
+
+      btn.textContent = 'Sincronizado ✔';
+      document.getElementById('syncStateLabel').textContent = 'Conectado al Lector';
+      document.getElementById('configDrawer').classList.remove('open');
+
+      r4Poller = setInterval(async () => {
+        try {
+          const res = await fetch(`${ip}/estado`, { cache: 'no-store' });
+          const data = await res.json();
+          // data = { evento: "PAGO_CELULAR" | "PAGO_TNE", saldo: 1200 }
+          if (data.evento === 'PAGO_CELULAR') {
+            state.balance = data.saldo;
+            saveState();
+            procesarPago('Celular NFC');
+          } else if (data.evento === 'PAGO_TNE') {
+            state.balance = data.saldo;
+            saveState();
+            procesarPago('Tarjeta TNE Física');
+          } else if (data.evento === 'RECHAZADO') {
+            mostrarErrorLectura();
+          }
+        } catch {}
+      }, 400);
+    });
+
+    document.getElementById('btnToggleConfig').addEventListener('click', () => {
+      document.getElementById('configDrawer').classList.toggle('open');
+    });
+
+    document.getElementById('btnScanPhysicalTne').addEventListener('click', escanearTneFisica);
+
+    document.getElementById('btnManualUid').addEventListener('click', () => {
+      const nuevo = prompt('Ingresa el UID de tu tarjeta TNE (ej. 01020304):', state.uid);
+      if (nuevo) {
+        state.uid = sanitizeHex(nuevo);
+        saveState();
+        renderUI();
+      }
+    });
+
+    renderUI();
+  </script>
 </body>
 </html>
