@@ -113,7 +113,6 @@
             🆘 Usar Préstamo Escolar de Emergencia (-$200)
           </button>
 
-          <!-- Botón 1 actualizado: Cambiar TNE -->
           <button type="button" class="btn-secondary" id="scanNfcWalletBtn">
             Cambiar TNE
           </button>
@@ -154,26 +153,26 @@
         </div>
       </section>
 
-      <!-- 5. VISTA CUENTA -->
+      <!-- 5. VISTA CUENTA (Recuadros vacíos, solo con texto de ejemplo en gris) -->
       <section class="view-panel" id="view-cuenta">
         <details class="accordion-card" open>
           <summary>👤 Datos del Estudiante</summary>
-          <form id="registerForm">
+          <form id="registerForm" autocomplete="off">
             <div class="form-group">
               <label class="form-label" for="regNombre">Nombre Completo</label>
-              <input type="text" id="regNombre" class="form-input" required />
+              <input type="text" id="regNombre" class="form-input" placeholder="Ej: Matías Pino" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="regRut">RUT Chileno</label>
-              <input type="text" id="regRut" class="form-input" placeholder="21.345.678-9" required />
+              <input type="text" id="regRut" class="form-input" placeholder="Ej: 21.345.678-9" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="regInstitucion">Institución</label>
-              <input type="text" id="regInstitucion" class="form-input" value="Universidad de Valparaíso" required />
+              <input type="text" id="regInstitucion" class="form-input" placeholder="Ej: Universidad de Valparaíso" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="regCorreo">Correo Institucional</label>
-              <input type="email" id="regCorreo" class="form-input" required />
+              <input type="email" id="regCorreo" class="form-input" placeholder="Ej: estudiante@alumnos.uv.cl" required />
             </div>
             <div class="form-group">
               <label class="form-label" for="regPassword">Contraseña</label>
@@ -181,7 +180,6 @@
             </div>
             <input type="hidden" id="regUid" />
             <div class="form-group">
-              <!-- Botón 2 actualizado: Vincular TNE -->
               <button type="button" class="btn-secondary" id="scanNfcRegBtn">
                 Vincular TNE
               </button>
@@ -228,9 +226,7 @@
     </nav>
   </div>
 
-  <!-- =========================================================================
-       MODAL GUÍA VISUAL ILUSTRADA DE 2 PASOS (TARJETA TNE DETRÁS DEL CELULAR)
-       ========================================================================= -->
+  <!-- MODAL GUÍA VISUAL ILUSTRADA DE 2 PASOS (TARJETA TNE DETRÁS DEL CELULAR) -->
   <div class="modal-backdrop" id="nfcGuideModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="nfcGuideTitle">
     <div class="modal-card nfc-guide-card">
       <div class="nfc-guide-header">
@@ -238,7 +234,7 @@
         <h2 id="nfcGuideTitle" class="modal-title">Vincular TNE</h2>
       </div>
 
-      <!-- PASO 1: El celular y la tarjeta TNE en portada -->
+      <!-- PASO 1 -->
       <div class="nfc-step-row">
         <div class="nfc-illustration-box">
           <div class="illus-backdrop"></div>
@@ -249,7 +245,6 @@
               <div class="illus-app-line"></div>
             </div>
           </div>
-          <!-- Tarjeta TNE flotando al frente (Paso 1) -->
           <div class="illus-tne-card step1-card">
             <span class="illus-tne-tag">TNE</span>
             <div class="illus-tne-chip"></div>
@@ -261,7 +256,7 @@
         </div>
       </div>
 
-      <!-- PASO 2: La tarjeta TNE colocada DETRÁS del celular -->
+      <!-- PASO 2 -->
       <div class="nfc-step-row reverse">
         <div class="nfc-step-text">
           <span class="step-big-num">2</span>
@@ -269,14 +264,11 @@
         </div>
         <div class="nfc-illustration-box">
           <div class="illus-backdrop"></div>
-          <!-- Ondas de lectura NFC -->
           <div class="illus-nfc-waves"></div>
-          <!-- Tarjeta TNE posicionada DETRÁS del teléfono -->
           <div class="illus-tne-card step2-card-behind">
             <span class="illus-tne-tag">TNE</span>
             <div class="illus-tne-chip"></div>
           </div>
-          <!-- Teléfono por delante tapando parcialmente la tarjeta -->
           <div class="illus-phone front-phone">
             <div class="illus-notch"></div>
             <div class="illus-screen scanning">
@@ -287,7 +279,6 @@
         </div>
       </div>
 
-      <!-- Estado en vivo del escaneo NFC -->
       <div class="nfc-live-status" id="nfcLiveStatusBox">
         <span class="nfc-pulse-dot"></span>
         <span id="nfcLiveStatusText">Ponga su TNE detrás del celular...</span>
@@ -336,10 +327,10 @@
       <p class="modal-desc">
         Ingresa con tu correo para acceder a tu Pase Estudiantil.
       </p>
-      <form id="loginForm">
+      <form id="loginForm" autocomplete="off">
         <div class="form-group">
           <label class="form-label" for="loginCorreo">Correo Electrónico</label>
-          <input type="email" id="loginCorreo" class="form-input" required placeholder="estudiante@alumnos.uv.cl" />
+          <input type="email" id="loginCorreo" class="form-input" required placeholder="Ej: estudiante@alumnos.uv.cl" />
         </div>
         <div class="form-group">
           <label class="form-label" for="loginPassword">Contraseña</label>
