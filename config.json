@@ -1,0 +1,26 @@
+{
+  "app": {
+    "nombre": "Mi Pase TNE · Valparaíso",
+    "sello": "SELLO 2026",
+    "intervaloPollingMs": 1500,
+    "cooldownSegundos": 3
+  },
+  "supabase": {
+    "url": "https://yrbdxblbeezqqlubbxcf.supabase.co",
+    "anonKey": "sb_publishable_cNpSzGUBVe0trfYXppsgRg_mWHzJafw"
+  },
+  "tarifas": {
+    "escolar": 200,
+    "adultoReferencia": 760,
+    "alertaSaldoBajo": 400,
+    "montosRecarga": [1000, 2000, 5000]
+  },
+  "zonasMapa": {
+    "Playa Ancha": { "cx": 38, "cy": 52, "coords": "-33.028, -71.641" },
+    "Plan de Valparaíso": { "cx": 105, "cy": 72, "coords": "-33.045, -71.619" },
+    "Cerro Barón": { "cx": 165, "cy": 78, "coords": "-33.048, -71.605" },
+    "Av. España": { "cx": 245, "cy": 54, "coords": "-33.034, -71.585" },
+    "Viña del Mar": { "cx": 330, "cy": 30, "coords": "-33.015, -71.549" },
+    "Placilla": { "cx": 195, "cy": 124, "coords": "-33.116, -71.571" }
+  }
+}

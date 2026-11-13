@@ -1,2133 +1,356 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-CL">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="description" content="Portal y Billetera TNE con Creación de Cuenta, Vinculación NFC y Validador Arduino en Supabase" />
-  <title>Mi Pase TNE — Cuenta y Validador</title>
-  <style>
-    :root {
-      --bg-canvas: #F1F5F9;
-      --bg-surface: #FFFFFF;
-      --bg-elevated: #F8FAFC;
-      --navy-header: #102A43;
-      --navy-accent: #1E3A8A;
-      --tne-cyan: #0284C7;
-      --text-primary: #0F172A;
-      --text-secondary: #475569;
-      --text-muted: #64748B;
-      --border-subtle: #E2E8F0;
-      --border-strong: #CBD5E1;
-      --green-ok: #15803D;
-      --green-bg: #DCFCE7;
-      --amber-warn: #B45309;
-      --amber-bg: #FEF3C7;
-      --red-err: #B91C1C;
-      --red-bg: #FEE2E2;
-    }
-
-    body.dark-mode {
-      --bg-canvas: #090D16;
-      --bg-surface: #111827;
-      --bg-elevated: #1E293B;
-      --navy-header: #060B14;
-      --navy-accent: #2563EB;
-      --tne-cyan: #38BDF8;
-      --text-primary: #F8FAFC;
-      --text-secondary: #CBD5E1;
-      --text-muted: #94A3B8;
-      --border-subtle: #1E293B;
-      --border-strong: #334155;
-      --green-ok: #4ADE80;
-      --green-bg: rgba(21, 128, 61, 0.25);
-      --amber-warn: #FBBF24;
-      --amber-bg: rgba(180, 83, 9, 0.25);
-      --red-err: #F87171;
-      --red-bg: rgba(185, 28, 28, 0.25);
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: var(--bg-canvas);
-      color: var(--text-primary);
-      min-height: 100dvh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      overflow-x: hidden;
-      transition: background-color 0.2s ease, color 0.2s ease;
-    }
-
-    .app-shell {
-      width: 100%;
-      max-width: 440px;
-      min-height: 100dvh;
-      background: var(--bg-canvas);
-      display: flex;
-      flex-direction: column;
-      border-left: 1px solid var(--border-subtle);
-      border-right: 1px solid var(--border-subtle);
-    }
-
-    .top-bar {
-      background-color: var(--navy-header);
-      color: #FFFFFF;
-      padding: 14px 14px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .top-bar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .brand-group { display: flex; flex-direction: column; gap: 2px; }
-    .brand-title { font-size: 1.02rem; font-weight: 800; letter-spacing: -0.01em; }
-    .brand-subtitle {
-      font-size: 0.72rem;
-      color: #93C5FD;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-variant-numeric: tabular-nums;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .header-controls { display: flex; align-items: center; gap: 6px; }
-    .icon-pill-btn {
-      background: rgba(255, 255, 255, 0.12);
-      color: #FFFFFF;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 6px 9px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      min-height: 34px;
-    }
-    .icon-pill-btn:hover { background: rgba(255, 255, 255, 0.22); }
-
-    .net-badge {
-      font-size: 0.66rem;
-      font-weight: 700;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.12);
-      color: #E2E8F0;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      white-space: nowrap;
-      font-variant-numeric: tabular-nums;
-    }
-    .net-badge.offline { background: var(--amber-bg); color: var(--amber-warn); border-color: #FCD34D; }
-
-    .nav-tabs {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      background: rgba(15, 23, 42, 0.45);
-      padding: 4px;
-      border-radius: 10px;
-      gap: 4px;
-    }
-
-    .tab-btn {
-      background: transparent;
-      color: #CBD5E1;
-      border: none;
-      padding: 7px 4px;
-      border-radius: 7px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      cursor: pointer;
-      min-height: 48px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      transition: background-color 0.15s ease, color 0.15s ease;
-    }
-    .tab-btn svg { width: 18px; height: 18px; stroke-width: 2.1; }
-    .tab-btn:hover { color: #FFFFFF; }
-    .tab-btn:focus-visible { outline: 2px solid #93C5FD; outline-offset: -2px; }
-    .tab-btn.active { background: #FFFFFF; color: #102A43; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
-
-    main { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-    .view-panel { display: none; flex-direction: column; gap: 12px; animation: fadeIn 0.15s ease-out; }
-    .view-panel.active { display: flex; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
-
-    .low-balance-banner {
-      display: none;
-      background: var(--amber-bg);
-      border: 1.5px solid #F59E0B;
-      color: var(--amber-warn);
-      border-radius: 12px;
-      padding: 12px 14px;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .low-balance-banner.visible { display: flex; }
-    .low-balance-text { display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; line-height: 1.35; }
-    .low-balance-text strong { font-size: 0.84rem; font-weight: 800; }
-    .low-balance-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
-    .btn-mini-banner {
-      background: #D97706;
-      color: #FFFFFF;
-      border: none;
-      border-radius: 8px;
-      padding: 7px 10px;
-      font-size: 0.74rem;
-      font-weight: 800;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .btn-mini-banner.emergency { background: #102A43; color: #FFFFFF; }
-
-    .frozen-banner {
-      display: none;
-      background: var(--red-bg);
-      border: 1.5px solid var(--red-err);
-      color: var(--red-err);
-      border-radius: 12px;
-      padding: 12px 14px;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 0.8rem;
-      font-weight: 700;
-    }
-    .frozen-banner.visible { display: flex; }
-
-    .tne-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-strong);
-      border-radius: 14px;
-      overflow: hidden;
-      box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
-      display: flex;
-      flex-direction: column;
-    }
-    .tne-card.is-frozen { border-color: var(--red-err); }
-
-    .tne-institutional-strip {
-      background: linear-gradient(90deg, #102A43 0%, #1E3A8A 65%, #0284C7 100%);
-      color: #FFFFFF;
-      padding: 8px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    .tne-strip-left { display: flex; align-items: center; gap: 6px; }
-    .tne-seal-2026 {
-      background: rgba(255, 255, 255, 0.18);
-      border: 1px solid rgba(255, 255, 255, 0.35);
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-size: 0.65rem;
-      font-weight: 800;
-      letter-spacing: 0.05em;
-    }
-
-    .tne-card-body { padding: 15px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
-    .tne-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 10px;
-      gap: 8px;
-    }
-    .student-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .student-name {
-      font-size: 1.02rem;
-      font-weight: 800;
-      color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .student-meta { font-size: 0.77rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-    .badge-row { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-    .uid-badge {
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 0.78rem;
-      font-weight: 700;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-strong);
-      padding: 3px 8px;
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .status-pill {
-      font-size: 0.7rem;
-      font-weight: 800;
-      padding: 3px 9px;
-      border-radius: 999px;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-    }
-    .status-pill.ok { background: var(--green-bg); color: var(--green-ok); }
-    .status-pill.warn { background: var(--amber-bg); color: var(--amber-warn); }
-    .status-pill.err { background: var(--red-bg); color: var(--red-err); }
-
-    .balance-block { display: flex; justify-content: space-between; align-items: center; padding-top: 2px; gap: 10px; }
-    .balance-label-col { display: flex; flex-direction: column; gap: 6px; }
-    .balance-label { font-size: 0.76rem; color: var(--text-secondary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-    .card-tools-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-
-    .btn-eye-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-strong);
-      color: var(--text-secondary);
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 5px 9px;
-      border-radius: 7px;
-      cursor: pointer;
-      width: fit-content;
-      transition: background-color 0.15s ease, color 0.15s ease;
-    }
-    .btn-eye-toggle svg { width: 14px; height: 14px; }
-    .btn-eye-toggle:hover { background: #E0F2FE; color: #102A43; border-color: #7DD3FC; }
-
-    .balance-value {
-      font-size: clamp(1.85rem, 6.8vw, 2.35rem);
-      font-weight: 800;
-      color: var(--text-primary);
-      font-variant-numeric: tabular-nums;
-      letter-spacing: -0.02em;
-    }
-    .balance-value.negative-loan { color: var(--red-err); }
-    .balance-value.masked { letter-spacing: 0.06em; color: var(--text-muted); }
-
-    .fare-meta {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.79rem;
-      color: var(--text-muted);
-      background: var(--bg-elevated);
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border-subtle);
-      font-variant-numeric: tabular-nums;
-    }
-    .fare-meta.critical-balance { background: var(--amber-bg); color: var(--amber-warn); border-color: #FCD34D; font-weight: 700; }
-
-    .cooldown-banner {
-      display: none;
-      align-items: center;
-      justify-content: space-between;
-      background: #EFF6FF;
-      border: 1px solid #93C5FD;
-      color: #1E3A8A;
-      padding: 8px 12px;
-      border-radius: 9px;
-      font-size: 0.76rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-    }
-    body.dark-mode .cooldown-banner { background: rgba(37, 99, 235, 0.2); color: #93C5FD; }
-    .cooldown-banner.active { display: flex; }
-
-    .stats-bento { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .stat-box {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 11px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-    .stat-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; }
-    .stat-value { font-size: 1.05rem; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-    .stat-value.green { color: var(--green-ok); }
-    .stat-sub { font-size: 0.69rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-
-    .validator-stage {
-      background: var(--bg-surface);
-      border: 2px solid var(--border-strong);
-      border-radius: 16px;
-      padding: 22px 16px;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 195px;
-      gap: 10px;
-      transition: background-color 0.2s ease, border-color 0.2s ease;
-    }
-    .validator-stage.state-espera { border-color: #93C5FD; }
-    .validator-stage.state-aprobado { background: var(--green-bg); border-color: var(--green-ok); }
-    .validator-stage.state-rechazado { background: var(--red-bg); border-color: var(--red-err); }
-
-    .stage-icon { width: 62px; height: 62px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-    .state-espera .stage-icon { background: #EFF6FF; color: #1E3A8A; border: 2px solid #BFDBFE; }
-    body.dark-mode .state-espera .stage-icon { background: rgba(37, 99, 235, 0.2); color: #60A5FA; border-color: #3B82F6; }
-    .state-aprobado .stage-icon { background: var(--green-ok); color: #FFFFFF; }
-    .state-rechazado .stage-icon { background: var(--red-err); color: #FFFFFF; }
-    .stage-title { font-size: 1.22rem; font-weight: 800; color: var(--text-primary); }
-    .stage-subtitle { font-size: 0.85rem; color: var(--text-secondary); max-width: 34ch; line-height: 1.4; }
-
-    .section-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
-      padding: 14px 15px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .section-header-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .section-title { font-size: 0.78rem; font-weight: 800; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
-    .link-btn { background: none; border: none; color: var(--tne-cyan); font-size: 0.75rem; font-weight: 700; cursor: pointer; }
-    .link-btn:hover { text-decoration: underline; }
-
-    .recharge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-    .btn-recharge {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      padding: 12px 8px;
-      font-size: 0.92rem;
-      font-weight: 700;
-      color: var(--text-primary);
-      cursor: pointer;
-      min-height: 46px;
-      font-variant-numeric: tabular-nums;
-    }
-    .btn-recharge:hover, .btn-recharge:focus-visible { background: #E0F2FE; color: #102A43; border-color: #0284C7; outline: none; }
-
-    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .btn-primary {
-      background: #102A43;
-      color: #FFFFFF;
-      border: none;
-      border-radius: 10px;
-      padding: 12px 14px;
-      font-size: 0.85rem;
-      font-weight: 700;
-      cursor: pointer;
-      min-height: 48px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      transition: background-color 0.15s ease, opacity 0.15s ease;
-    }
-    body.dark-mode .btn-primary { background: #2563EB; }
-    .btn-primary svg, .btn-secondary svg, .btn-emergency svg { width: 17px; height: 17px; flex-shrink: 0; }
-    .btn-primary:hover, .btn-primary:focus-visible { background: var(--navy-accent); outline: 2px solid var(--navy-accent); }
-    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
-
-    .btn-secondary {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      padding: 12px 14px;
-      font-size: 0.84rem;
-      font-weight: 700;
-      cursor: pointer;
-      min-height: 48px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-    }
-    .btn-secondary:hover { border-color: var(--tne-cyan); }
-
-    .btn-emergency {
-      background: var(--amber-bg);
-      color: var(--amber-warn);
-      border: 1.5px solid #F59E0B;
-      border-radius: 10px;
-      padding: 12px 14px;
-      font-size: 0.84rem;
-      font-weight: 800;
-      cursor: pointer;
-      min-height: 48px;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      width: 100%;
-    }
-    .btn-emergency.visible { display: flex; }
-
-    .form-group { display: flex; flex-direction: column; gap: 5px; }
-    .form-label { font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); }
-    .form-input, .form-select {
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border-strong);
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      font-size: 0.9rem;
-      min-height: 44px;
-    }
-    .form-input.uid-field { font-family: ui-monospace, SFMono-Regular, monospace; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em; }
-    .uid-input-row { display: flex; gap: 8px; }
-    .chip-group { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-    .uid-chip {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      border: 1px solid var(--border-strong);
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 0.75rem;
-      font-family: ui-monospace, monospace;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .uid-chip:hover { background: #E0F2FE; color: #102A43; border-color: #0284C7; }
-
-    .alert-box { padding: 12px; border-radius: 10px; font-size: 0.82rem; font-weight: 600; display: none; line-height: 1.4; }
-    .alert-box.ok { display: block; background: var(--green-bg); color: var(--green-ok); border: 1px solid #86EFAC; }
-    .alert-box.err { display: block; background: var(--red-bg); color: var(--red-err); border: 1px solid #FCA5A5; }
-
-    .valpo-map-card {
-      background: #0F172A;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 12px;
-      color: #F8FAFC;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .valpo-map-svg { width: 100%; height: 145px; background: #0B132B; border-radius: 8px; border: 1px solid #1E293B; display: block; }
-    .map-legend { display: flex; justify-content: space-between; font-size: 0.71rem; color: #94A3B8; }
-
-    .history-list { list-style: none; display: flex; flex-direction: column; gap: 7px; max-height: 310px; overflow-y: auto; }
-    .history-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 9px 11px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      font-size: 0.81rem;
-      font-variant-numeric: tabular-nums;
-    }
-    .history-left { display: flex; flex-direction: column; gap: 2px; }
-    .history-title { font-weight: 700; color: var(--text-primary); }
-    .history-time { font-size: 0.72rem; color: var(--text-muted); }
-    .history-geo { font-size: 0.7rem; color: var(--tne-cyan); font-weight: 600; }
-    .history-amount { font-weight: 800; font-size: 0.86rem; }
-    .history-amount.neg { color: var(--red-err); }
-    .history-amount.pos { color: var(--green-ok); }
-
-    .qr-modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.72);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      z-index: 50;
-      backdrop-filter: blur(4px);
-    }
-    .qr-modal-backdrop.open { display: flex; }
-    .qr-modal-card {
-      background: var(--bg-surface);
-      color: var(--text-primary);
-      width: 100%;
-      max-width: 345px;
-      border-radius: 16px;
-      padding: 18px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      text-align: center;
-      border: 1px solid var(--border-strong);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-    }
-    .qr-canvas-box { background: #FFFFFF; border: 2px solid #102A43; border-radius: 12px; padding: 12px; display: flex; align-items: center; justify-content: center; }
-    .qr-timer-pill {
-      font-size: 0.76rem;
-      font-weight: 700;
-      color: #1E3A8A;
-      background: #EFF6FF;
-      border: 1px solid #BFDBFE;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .homescreen-widget-card {
-      background: linear-gradient(145deg, #102A43 0%, #0F172A 100%);
-      color: #FFFFFF;
-      width: 100%;
-      max-width: 350px;
-      border-radius: 22px;
-      padding: 18px;
-      border: 1.5px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .widget-top-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #93C5FD; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-    .widget-main-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .widget-balance-big { font-size: 2.15rem; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
-    .widget-mini-qr { background: #FFFFFF; padding: 6px; border-radius: 10px; cursor: pointer; }
-    .widget-btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .widget-fast-btn { background: #0284C7; color: #FFFFFF; border: none; border-radius: 10px; padding: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; }
-    .widget-fast-btn.secondary { background: rgba(255, 255, 255, 0.14); }
-
-    footer { padding: 12px 16px; text-align: center; font-size: 0.73rem; color: var(--text-muted); border-top: 1px solid var(--border-subtle); background: var(--bg-surface); }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0F2537" />
+  <meta name="description" content="Mi Pase TNE Valparaíso - Billetera estudiantil digital" />
+  <title>Mi Pase TNE · Valparaíso</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./app.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
-    <header class="top-bar">
-      <div class="top-bar-row">
-        <div class="brand-group">
-          <span class="brand-title">Mi Pase TNE · Valparaíso</span>
-          <span class="brand-subtitle" id="syncIndicator">Conectando a Supabase...</span>
+    <!-- Encabezado superior limpio -->
+    <header class="app-header">
+      <h1 class="header-brand">Mi Pase TNE</h1>
+      <div class="header-actions">
+        <div class="cloud-pill" id="syncPill" title="Estado de tu Pase Escolar">
+          <span class="status-dot" id="syncDot"></span>
+          <span id="syncText">Pase Activo</span>
         </div>
-        <div class="header-controls">
-          <button type="button" class="icon-pill-btn" id="openWidgetBtn" title="Abrir Widget de Escritorio">
-            📱 Widget
-          </button>
-          <button type="button" class="icon-pill-btn" id="darkModeToggleBtn" title="Cambiar Modo Oscuro / Claro" aria-label="Alternar Modo Oscuro">
-            <span id="themeIcon">🌙</span>
-          </button>
-          <span class="net-badge" id="netModeBadge">Online</span>
-        </div>
+        <button type="button" class="theme-btn" id="themeToggleBtn" aria-label="Cambiar modo oscuro o claro" title="Modo Oscuro / Claro">
+          🌙
+        </button>
       </div>
-
-      <nav class="nav-tabs" aria-label="Secciones de la aplicación">
-        <button type="button" class="tab-btn active" data-tab="saldo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          <span>Saldo</span>
-        </button>
-        <button type="button" class="tab-btn" data-tab="pago">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/></svg>
-          <span>Pago</span>
-        </button>
-        <button type="button" class="tab-btn" data-tab="recarga">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-          <span>Recarga</span>
-        </button>
-        <button type="button" class="tab-btn" data-tab="historial">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          <span>Historial</span>
-        </button>
-        <button type="button" class="tab-btn" data-tab="cuenta">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          <span>Cuenta</span>
-        </button>
-      </nav>
     </header>
 
-    <main>
-      <!-- Banner Dinámico de Saldo Bajo (< $400) + Préstamo Escolar -->
-      <div class="low-balance-banner" id="lowBalanceBanner" role="alert">
-        <div class="low-balance-text">
-          <strong>⚠️ Alerta de Saldo Bajo (menos de 2 viajes)</strong>
-          <span>Tienes menos de $400 en tu TNE. Recarga o activa 1 Pasaje de Emergencia.</span>
-        </div>
-        <div class="low-balance-actions">
-          <button type="button" class="btn-mini-banner" onclick="mostrarPestana('recarga')">Recargar</button>
-          <button type="button" class="btn-mini-banner emergency" id="bannerEmergencyBtn">Fiado -$200</button>
-        </div>
+    <main class="main-content">
+      <!-- Notificación flotante unificada -->
+      <div id="toastBanner" class="toast-banner" role="status" aria-live="polite">
+        <span id="toastText"></span>
       </div>
 
-      <!-- Banner de Tarjeta Congelada por Extravío -->
-      <div class="frozen-banner" id="frozenCardBanner" role="alert">
-        <span>🔒 TNE Bloqueada temporalmente por extravío. Saldo protegido.</span>
-        <button type="button" class="btn-mini-banner" id="quickUnfreezeBtn" style="background: var(--red-err);">Desbloquear</button>
-      </div>
-
-      <!-- PESTAÑA 1: SALDO -->
-      <div class="view-panel active" id="view-saldo">
-        <section class="tne-card" id="mainTneCard" aria-label="Credencial estudiantil vinculada">
-          <div class="tne-institutional-strip">
-            <div class="tne-strip-left"><span>JUNAEB · Tarjeta Nacional Estudiantil</span></div>
-            <span class="tne-seal-2026">SELLO 2026</span>
-          </div>
-
-          <div class="tne-card-body">
-            <div class="tne-card-header">
-              <div class="student-info">
-                <span class="student-name" id="studentNameLabel">Estudiante TNE</span>
-                <span class="student-meta" id="studentMetaLabel">Educación Superior · Sin RUT</span>
-              </div>
-              <div class="badge-row">
-                <span class="uid-badge" id="currentUidLabel">UID: FCDC1198</span>
-                <span class="status-pill ok" id="cardStatusBadge">ACTIVO</span>
-              </div>
-            </div>
-
-            <div class="balance-block">
-              <div class="balance-label-col">
-                <span class="balance-label">Saldo Disponible</span>
-                <div class="card-tools-row">
-                  <button type="button" class="btn-eye-toggle" id="toggleBalanceBtn" aria-label="Ocultar o mostrar saldo">
-                    <svg id="eyeSvgIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                    </svg>
-                    <span id="eyeLabel">Ocultar</span>
-                  </button>
-                  <button type="button" class="btn-eye-toggle" id="openQrModalBtn" aria-label="Mostrar Pase QR de respaldo">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                    </svg>
-                    <span>Pase QR</span>
-                  </button>
-                  <button type="button" class="btn-eye-toggle" id="enablePushBtn" title="Activar notificaciones de saldo bajo">
-                    🔔 Alertas
-                  </button>
-                </div>
-              </div>
-              <span class="balance-value" id="balanceDisplay">$1.000</span>
-            </div>
-
-            <div class="fare-meta" id="fareMetaBox">
-              <span>Tarifa Escolar: <strong>$200 CLP</strong></span>
-              <span id="tripsLeftLabel">Viajes disponibles: 5</span>
-            </div>
-          </div>
-        </section>
-
-        <div class="cooldown-banner" id="cooldownBanner">
-          <span>Escudo anti-doble cobro activo</span>
-          <span id="cooldownTimerText">3s</span>
+      <!-- Banner de Préstamo Escolar de Emergencia (aparece automático si saldo < $200) -->
+      <div id="emergencyBanner" class="emergency-banner" role="alert">
+        <div class="emergency-info">
+          <strong>🆘 Te quedaste sin saldo para viajar</strong>
+          <span>Activa 1 Pasaje Escolar de Emergencia (-$200). Se descuenta en tu próxima recarga.</span>
         </div>
-
-        <div class="action-grid">
-          <button type="button" class="btn-primary" onclick="mostrarPestana('pago')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/></svg>
-            <span>Ir a Pagar (-$200)</span>
-          </button>
-          <button type="button" class="btn-secondary" onclick="mostrarPestana('recarga')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>Ir a Recargar</span>
-          </button>
-        </div>
-
-        <div class="stats-bento" aria-label="Estadísticas de beneficio estudiantil">
-          <div class="stat-box">
-            <span class="stat-label">Ahorro Ley 20.378</span>
-            <span class="stat-value green" id="statSavingsValue">$0</span>
-            <span class="stat-sub">vs. tarifa adulto ($760)</span>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Viajes Validados</span>
-            <span class="stat-value" id="statTripsCount">0 viajes</span>
-            <span class="stat-sub" id="statLastZone">Gran Valparaíso · GPS</span>
-          </div>
-        </div>
-
-        <section class="section-card">
-          <div class="section-header-row">
-            <h2 class="section-title">Últimos Movimientos</h2>
-            <button type="button" class="link-btn" onclick="mostrarPestana('historial')">Ver mapa e historial →</button>
-          </div>
-          <ul class="history-list" id="homeMiniHistory">
-            <li class="history-item">
-              <div class="history-left">
-                <span class="history-title">Billetera sincronizada</span>
-                <span class="history-time">Pasa tu TNE por el Arduino o paga en la app</span>
-              </div>
-              <span class="history-amount">---</span>
-            </li>
-          </ul>
-        </section>
-      </div>
-
-      <!-- PESTAÑA 2: PAGO -->
-      <div class="view-panel" id="view-pago">
-        <section class="validator-stage state-espera" id="validatorStage" aria-live="polite">
-          <div class="stage-icon" id="stageIcon">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><path d="M2 12a2 2 0 0 1 2-2"/><rect x="6" y="8" width="16" height="12" rx="2"/>
-            </svg>
-          </div>
-          <h1 class="stage-title" id="stageTitle">Acerca tu TNE al Validador</h1>
-          <p class="stage-subtitle" id="stageSubtitle">
-            Pasa tu TNE física por el lector del Arduino o usa el botón de abajo. El saldo se descuenta en vivo.
-          </p>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header-row">
-            <span class="section-title">📍 Zona de Abordaje (Gran Valparaíso)</span>
-            <button type="button" class="link-btn" id="detectGpsBtn">Detectar mi GPS</button>
-          </div>
-          <select id="busZoneSelect" class="form-select" aria-label="Sector o línea donde subes a la micro">
-            <option value="Plan de Valparaíso · Av. Brasil (-33.045, -71.619)">Plan de Valparaíso · Av. Brasil (Línea 508)</option>
-            <option value="Cerro Barón · Av. Argentina (-33.048, -71.605)">Cerro Barón · Av. Argentina (Línea 504)</option>
-            <option value="Playa Ancha · UPLA / UV (-33.028, -71.641)">Playa Ancha · Sector Universitario (Línea 501)</option>
-            <option value="Av. España · Recreo / UTFSM (-33.034, -71.585)">Av. España · UTFSM / Recreo (Línea 602)</option>
-            <option value="Placilla / Curauma · PUCV (-33.116, -71.571)">Placilla / Curauma · Campus PUCV (Línea 105)</option>
-            <option value="Viña del Mar · 15 Norte (-33.015, -71.549)">Viña del Mar · 15 Norte / Centro (Línea 301)</option>
-          </select>
-
-          <div class="fare-meta">
-            <span>TNE activa: <strong id="pagoUidPreview">FCDC1198</strong></span>
-            <span>Saldo: <strong id="pagoBalancePreview">$1.000</strong></span>
-          </div>
-
-          <div class="action-grid">
-            <button type="button" class="btn-primary" id="payWebBtn">Pagar Pasaje (-$200)</button>
-            <button type="button" class="btn-secondary" id="scanNfcWalletBtn">Cambiar TNE por NFC</button>
-          </div>
-
-          <button type="button" class="btn-emergency" id="emergencyLoanBtn">
-            🆘 Usar Préstamo Escolar de Emergencia (-$200 al Fiado)
-          </button>
-        </section>
-      </div>
-
-      <!-- PESTAÑA 3: RECARGA -->
-      <div class="view-panel" id="view-recarga">
-        <section class="section-card">
-          <h2 class="section-title">Recargar Saldo en la Cuenta</h2>
-          <p style="font-size: 0.82rem; color: var(--text-secondary);">
-            Selecciona un monto para abonar directamente a tu tarjeta <strong id="recargaUidPreview">FCDC1198</strong> en Supabase:
-          </p>
-
-          <div class="alert-box err" id="loanPendingAlert" style="display: none;">
-            Tienes un <strong>Préstamo Escolar de Emergencia (-$200)</strong> activo. Se descontará automáticamente en tu próxima recarga.
-          </div>
-
-          <div class="recharge-grid">
-            <button type="button" class="btn-recharge" data-monto="1000">+$1.000</button>
-            <button type="button" class="btn-recharge" data-monto="2000">+$2.000</button>
-            <button type="button" class="btn-recharge" data-monto="5000">+$5.000</button>
-          </div>
-
-          <div class="uid-input-row" style="margin-top: 4px;">
-            <input type="number" id="customMontoInput" class="form-input" placeholder="Otro monto CLP (ej: 3000)" min="200" step="100" />
-            <button type="button" class="btn-primary" id="btnRecargaCustom" style="white-space: nowrap;">Recargar</button>
-          </div>
-
-          <div class="fare-meta">
-            <span>Saldo disponible actual:</span>
-            <strong id="recargaBalancePreview">$1.000</strong>
-          </div>
-        </section>
-      </div>
-
-      <!-- PESTAÑA 4: HISTORIAL Y MAPA DE VIAJES -->
-      <div class="view-panel" id="view-historial">
-        <section class="valpo-map-card" aria-label="Mapa de viajes en el Gran Valparaíso">
-          <div class="section-header-row">
-            <span style="font-size: 0.76rem; font-weight: 800; color: #38BDF8; text-transform: uppercase;">
-              🗺️ Mapa de Validaciones · Gran Valparaíso
-            </span>
-            <span style="font-size: 0.7rem; color: #A7F3D0;">GPS Activo</span>
-          </div>
-
-          <svg class="valpo-map-svg" viewBox="0 0 380 140" id="valpoMapSvg">
-            <path d="M 10,85 Q 55,40 110,68 T 225,52 T 360,22 L 380,140 L 0,140 Z" fill="#162238" stroke="#0284C7" stroke-width="2"/>
-            <path d="M 38,52 L 105,72 L 165,78 L 245,54 L 330,30" fill="none" stroke="#475569" stroke-width="2" stroke-dasharray="4 3"/>
-            <path d="M 165,78 L 195,124" fill="none" stroke="#475569" stroke-width="2" stroke-dasharray="4 3"/>
-            <g id="mapNodesGroup">
-              <circle cx="38" cy="52" r="5" fill="#38BDF8" /><text x="14" y="42" fill="#CBD5E1" font-size="9" font-weight="bold">Playa Ancha</text>
-              <circle cx="105" cy="72" r="5" fill="#38BDF8" /><text x="78" y="90" fill="#CBD5E1" font-size="9" font-weight="bold">Plan Valpo</text>
-              <circle cx="165" cy="78" r="5" fill="#38BDF8" /><text x="142" y="95" fill="#CBD5E1" font-size="9" font-weight="bold">C° Barón</text>
-              <circle cx="245" cy="54" r="5" fill="#38BDF8" /><text x="220" y="43" fill="#CBD5E1" font-size="9" font-weight="bold">Av. España</text>
-              <circle cx="330" cy="30" r="5" fill="#38BDF8" /><text x="300" y="20" fill="#CBD5E1" font-size="9" font-weight="bold">Viña del Mar</text>
-              <circle cx="195" cy="124" r="5" fill="#38BDF8" /><text x="205" y="128" fill="#CBD5E1" font-size="9" font-weight="bold">Placilla / PUCV</text>
-            </g>
-            <circle id="lastTripMapPulse" cx="105" cy="72" r="9" fill="none" stroke="#4ADE80" stroke-width="2.5"/>
-            <circle id="lastTripMapDot" cx="105" cy="72" r="5" fill="#4ADE80"/>
-          </svg>
-
-          <div class="map-legend">
-            <span>🟢 Último abordaje registrado</span>
-            <span id="lastGeoCoordsLabel">-33.045, -71.619</span>
-          </div>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header-row">
-            <h2 class="section-title">Movimientos y Coordenadas</h2>
-            <button type="button" class="btn-eye-toggle" id="clearHistoryBtn">Limpiar</button>
-          </div>
-          <ul class="history-list" id="historyList"></ul>
-        </section>
-      </div>
-
-      <!-- PESTAÑA 5: CUENTA, BLOQUEO POR EXTRAVÍO Y REPOSICIÓN -->
-      <div class="view-panel" id="view-cuenta">
-        <section class="section-card" style="border-color: #FCA5A5;">
-          <div class="section-header-row">
-            <h2 class="section-title" style="color: var(--red-err);">🛡️ Seguridad: Extravío y Reposición TNE</h2>
-            <span class="status-pill ok" id="securityStatePill">PROTEGIDA</span>
-          </div>
-          <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
-            Si perdiste tu TNE física, congélala al instante para resguardar tu saldo y transfiérelo a un nuevo UID de reposición.
-          </p>
-
-          <button type="button" class="btn-secondary" id="toggleFreezeCardBtn" style="border-color: var(--red-err); color: var(--red-err);">
-            🔒 Bloquear / Congelar TNE por Extravío
-          </button>
-
-          <div class="form-group" style="margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border-subtle);">
-            <label class="form-label" for="replaceUidInput">Transferir saldo a nueva TNE de reposición (8 HEX):</label>
-            <div class="uid-input-row">
-              <input type="text" id="replaceUidInput" class="form-input uid-field" maxlength="8" placeholder="Nuevo UID (Ej: A1B2C3D4)" />
-              <button type="button" class="btn-primary" id="transferUidBtn" style="white-space: nowrap;">Transferir Saldo</button>
-            </div>
-          </div>
-          <div id="securityAlertBox" class="alert-box"></div>
-        </section>
-
-        <section class="section-card">
-          <h2 class="section-title">Crear Cuenta y Activar TNE en Base de Datos</h2>
-          <p style="font-size: 0.83rem; color: var(--text-secondary); line-height: 1.4;">
-            Ingresa tus datos y el código UID de 8 caracteres de tu tarjeta. Al guardar, tu tarjeta quedará <strong>Activa</strong> en Supabase.
-          </p>
-
-          <div id="registerAlert" class="alert-box"></div>
-
-          <form id="registerForm" style="display: flex; flex-direction: column; gap: 12px;">
-            <div class="form-group">
-              <label class="form-label" for="regNombre">Nombre y Apellido del Estudiante *</label>
-              <input type="text" id="regNombre" class="form-input" required placeholder="Ej: Matías Pino" />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="regRut">RUT *</label>
-              <input type="text" id="regRut" class="form-input" required placeholder="Ej: 21.345.678-9" />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="regCorreo">Correo Institucional *</label>
-              <input type="email" id="regCorreo" class="form-input" required placeholder="Ej: estudiante@alumnos.uv.cl" />
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="regInstitucion">Institución / Tramo Estudiantil</label>
-              <select id="regInstitucion" class="form-select">
-                <option value="Universidad de Valparaíso (Superior)">Universidad de Valparaíso (Superior)</option>
-                <option value="Educación Superior (TNE)">Educación Superior (TNE)</option>
-                <option value="Enseñanza Media (TNE)">Enseñanza Media (TNE)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="regUid">Código UID de tu Tarjeta TNE (8 caracteres HEX) *</label>
-              <div class="uid-input-row">
-                <input type="text" id="regUid" class="form-input uid-field" maxlength="8" required placeholder="Ej: FCDC1198" />
-                <button type="button" class="btn-secondary" id="scanNfcRegBtn" style="white-space: nowrap;">Leer NFC</button>
-              </div>
-              <div class="chip-group">
-                <button type="button" class="uid-chip" data-fill-uid="FCDC1198">Usar FCDC1198</button>
-                <button type="button" class="uid-chip" data-fill-uid="1C520B29">Usar 1C520B29</button>
-                <button type="button" class="uid-chip" data-fill-uid="1CCC1598">Usar 1CCC1598</button>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="regSaldoInicial">Saldo Inicial de Activación</label>
-              <select id="regSaldoInicial" class="form-select">
-                <option value="1000">$1.000 CLP (5 viajes escolares)</option>
-                <option value="2000">$2.000 CLP (10 viajes escolares)</option>
-                <option value="5000">$5.000 CLP (25 viajes escolares)</option>
-              </select>
-            </div>
-            <button type="submit" class="btn-primary" id="submitRegBtn">Crear Cuenta y Habilitar TNE</button>
-          </form>
-        </section>
-
-        <section class="section-card">
-          <h2 class="section-title">¿Ya tienes una TNE registrada?</h2>
-          <div class="uid-input-row">
-            <input type="text" id="switchUidInput" class="form-input uid-field" maxlength="8" placeholder="UID de 8 caracteres" />
-            <button type="button" class="btn-secondary" id="switchUidBtn">Cargar TNE</button>
-          </div>
-        </section>
-
-        <section class="section-card">
-          <h2 class="section-title">Sesión de Usuario</h2>
-          <button type="button" class="btn-secondary" id="logoutBtn" style="border-color: #FCA5A5; color: var(--red-err);">
-            Cerrar Sesión (Salir)
-          </button>
-        </section>
-      </div>
-    </main>
-
-    <!-- Modal Widget de Pantalla de Inicio (Home Screen Widget) -->
-    <div class="qr-modal-backdrop" id="widgetModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="widgetTitleLabel">
-      <div class="homescreen-widget-card">
-        <div class="widget-top-row">
-          <span id="widgetTitleLabel">⚡ Widget Rápido · Mi Pase TNE</span>
-          <span id="widgetUidPill">UID: FCDC1198</span>
-        </div>
-        <div class="widget-main-row">
-          <div style="text-align: left;">
-            <div style="font-size: 0.74rem; color: #CBD5E1;">Saldo Disponible</div>
-            <div class="widget-balance-big" id="widgetBalanceText">$1.000</div>
-            <div style="font-size: 0.75rem; color: #4ADE80; font-weight: 700;" id="widgetTripsText">5 viajes disponibles</div>
-          </div>
-          <div class="widget-mini-qr" id="widgetOpenFullQr" title="Ampliar Pase QR">
-            <canvas id="widgetQrCanvas" width="76" height="76"></canvas>
-          </div>
-        </div>
-        <div class="widget-btn-row">
-          <button type="button" class="widget-fast-btn" id="widgetQuickPayBtn">📡 Pagar (-$200)</button>
-          <button type="button" class="widget-fast-btn secondary" id="widgetShowQrBtn">🔍 Ver Pase QR</button>
-        </div>
-        <button type="button" class="btn-secondary" id="closeWidgetModalBtn" style="background: rgba(255,255,255,0.08); color: #FFF; border-color: rgba(255,255,255,0.2); min-height: 40px;">
-          Volver a la App Completa
+        <button type="button" class="btn-emergency" id="bannerEmergencyBtn">
+          Pedir Fiado -$200
         </button>
       </div>
-    </div>
 
-    <!-- Modal Pase QR de Respaldo -->
-    <div class="qr-modal-backdrop" id="qrModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="qrModalTitle">
-      <div class="qr-modal-card">
-        <span class="section-title" id="qrModalTitle">Pase QR de Respaldo Offline</span>
-        <p style="font-size: 0.78rem; color: var(--text-secondary);">
-          Muestra este código en el validador si olvidaste tu TNE física o tu teléfono no tiene NFC.
-        </p>
-        <div class="qr-canvas-box">
-          <canvas id="qrCanvas" width="168" height="168"></canvas>
+      <!-- 1. VISTA SALDO -->
+      <section class="view-panel active" id="view-saldo">
+        <article class="card">
+          <div class="tne-strip">
+            <span>JUNAEB · Tarjeta Nacional Estudiantil</span>
+            <span class="seal-badge" id="sealBadge">SELLO 2026</span>
+          </div>
+
+          <div class="student-row">
+            <div>
+              <h2 class="student-name" id="studentNameLabel">Estudiante TNE</h2>
+              <p class="student-meta" id="studentMetaLabel">Educación Superior · Sin RUT</p>
+            </div>
+            <span class="uid-pill" id="cardStatusBadge">ACTIVA</span>
+          </div>
+
+          <div class="balance-row">
+            <div>
+              <span class="balance-label">Saldo Disponible</span>
+              <button type="button" class="btn-ghost" id="toggleEyeBtn" aria-label="Ocultar o mostrar saldo">
+                <span id="eyeLabel">👁️ Ocultar</span>
+              </button>
+            </div>
+            <span class="balance-value" id="balanceDisplay">$0</span>
+          </div>
+
+          <div class="fare-footer" id="fareFooterBox">
+            <span>Tarifa Escolar: <strong id="fareAmountLabel">$200 CLP</strong></span>
+            <span id="tripsLeftLabel">Viajes: 0</span>
+          </div>
+        </article>
+
+        <!-- Últimos 2 movimientos rápidos -->
+        <section class="card">
+          <div class="card-header-inline">
+            <h3 class="section-subtitle">Últimos Movimientos</h3>
+            <button type="button" class="btn-ghost" data-goto="historial">Ver todo</button>
+          </div>
+          <ul class="history-list" id="homeMiniHistory"></ul>
+        </section>
+      </section>
+
+      <!-- 2. VISTA PAGO -->
+      <section class="view-panel" id="view-pago">
+        <div class="validator-stage" id="validatorStage" aria-live="polite">
+          <div class="stage-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/>
+            </svg>
+          </div>
+          <h2 class="stage-title" id="stageTitle">Acerca tu TNE al Validador</h2>
+          <p class="stage-subtitle" id="stageSubtitle">
+            📲 Listo para viajar: acerca tu TNE o celular al validador de la micro.
+          </p>
         </div>
-        <span class="uid-badge" id="qrUidText">UID: FCDC1198</span>
-        <span class="qr-timer-pill" id="qrTimerLabel">Expira en 60s</span>
-        <button type="button" class="btn-primary" id="closeQrModalBtn" style="width: 100%;">Cerrar Pase QR</button>
-      </div>
-    </div>
 
-    <footer id="footerMessage">
-      Sincronizado con Supabase (yrbdxblbeezqqlubbxcf.supabase.co) · Proyecto Validador TNE
-    </footer>
+        <div class="card action-stack">
+          <div class="fare-footer">
+            <span>Sector GPS:</span>
+            <select id="zoneSelect" class="zone-select" aria-label="Sector GPS en Valparaíso"></select>
+          </div>
 
-    <!-- Modal Inicio de Sesión -->
-    <div class="qr-modal-backdrop" id="loginModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
-      <div class="qr-modal-card" style="text-align: left; align-items: stretch; max-width: 360px;">
-        <h2 class="section-title" id="loginModalTitle" style="text-align: center; margin-bottom: 4px;">Iniciar Sesión TNE</h2>
-        <p style="font-size: 0.78rem; color: var(--text-secondary); text-align: center; margin-bottom: 10px;">
-          Ingresa con tu correo y contraseña para acceder a tu cuenta y tarjeta vinculada.
-        </p>
-        <div id="loginAlert" class="alert-box"></div>
-        <form id="loginForm" style="display: flex; flex-direction: column; gap: 10px;">
-          <div class="form-group">
-            <label class="form-label" for="loginCorreo">Correo Electrónico</label>
-            <input type="email" id="loginCorreo" class="form-input" required placeholder="estudiante@alumnos.uv.cl" />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="loginPassword">Contraseña</label>
-            <input type="password" id="loginPassword" class="form-input" required placeholder="••••••••" />
-          </div>
-          <button type="submit" class="btn-primary" id="submitLoginBtn" style="width: 100%; margin-top: 4px;">
-            Ingresar a mi Cuenta
+          <button type="button" class="btn-primary btn-pay-huge" id="payWebBtn">
+            <span id="payBtnText">Pagar Pasaje Escolar (-$200)</span>
           </button>
-        </form>
-        <div style="text-align: center; margin-top: 8px; font-size: 0.78rem;">
-          <span style="color: var(--text-secondary);">¿No tienes cuenta?</span>
-          <button type="button" class="link-btn" id="goToRegisterFromLogin">Crear Cuenta y Registrar TNE</button>
+
+          <button type="button" class="btn-loan-action" id="payViewLoanBtn" style="display: none;">
+            🆘 Usar Préstamo Escolar de Emergencia (-$200)
+          </button>
+
+          <!-- Botón 1 actualizado: Cambiar TNE -->
+          <button type="button" class="btn-secondary" id="scanNfcWalletBtn">
+            Cambiar TNE
+          </button>
+        </div>
+      </section>
+
+      <!-- 3. VISTA RECARGA -->
+      <section class="view-panel" id="view-recarga">
+        <div class="card">
+          <h2 class="section-subtitle">Recargar Saldo en la Cuenta</h2>
+          <p class="helper-text">
+            Selecciona o ingresa el monto a abonar en tu Pase Estudiantil:
+          </p>
+          <div class="recharge-grid" id="rechargeButtonsContainer"></div>
+          <div class="custom-recharge-row">
+            <input type="number" id="customMontoInput" class="form-input" placeholder="Otro monto CLP (ej. 3000)" min="200" step="100" />
+            <button type="button" class="btn-primary btn-auto" id="customRechargeBtn">Cargar</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. VISTA HISTORIAL -->
+      <section class="view-panel" id="view-historial">
+        <div class="card savings-card">
+          <div>
+            <span class="balance-label">Ahorro Estudiantil (Ley 20.378)</span>
+            <strong class="savings-amount" id="statSavingsValue">$0</strong>
+          </div>
+          <span class="uid-pill" id="statTripsCount">0 viajes</span>
+        </div>
+
+        <div class="card">
+          <div class="card-header-inline">
+            <h2 class="section-subtitle">Registro de Movimientos</h2>
+            <button type="button" class="btn-ghost" id="clearHistoryBtn">Limpiar</button>
+          </div>
+          <ul class="history-list" id="historyList"></ul>
+        </div>
+      </section>
+
+      <!-- 5. VISTA CUENTA -->
+      <section class="view-panel" id="view-cuenta">
+        <details class="accordion-card" open>
+          <summary>👤 Datos del Estudiante</summary>
+          <form id="registerForm">
+            <div class="form-group">
+              <label class="form-label" for="regNombre">Nombre Completo</label>
+              <input type="text" id="regNombre" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regRut">RUT Chileno</label>
+              <input type="text" id="regRut" class="form-input" placeholder="21.345.678-9" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regInstitucion">Institución</label>
+              <input type="text" id="regInstitucion" class="form-input" value="Universidad de Valparaíso" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regCorreo">Correo Institucional</label>
+              <input type="email" id="regCorreo" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regPassword">Contraseña</label>
+              <input type="password" id="regPassword" class="form-input" placeholder="Mínimo 4 caracteres" />
+            </div>
+            <input type="hidden" id="regUid" />
+            <div class="form-group">
+              <!-- Botón 2 actualizado: Vincular TNE -->
+              <button type="button" class="btn-secondary" id="scanNfcRegBtn">
+                Vincular TNE
+              </button>
+            </div>
+            <button type="submit" class="btn-primary" style="margin-top:6px;">Guardar mis Datos</button>
+          </form>
+        </details>
+
+        <details class="accordion-card">
+          <summary>🔒 Seguridad y Bloqueo por Extravío</summary>
+          <p class="helper-text" style="margin-bottom:10px;">
+            Congela temporalmente los cobros de tu pase en caso de pérdida o cierra tu sesión actual.
+          </p>
+          <div class="action-stack">
+            <button type="button" class="btn-secondary" id="toggleFreezeBtn">Congelar / Desbloquear mi TNE</button>
+            <button type="button" class="btn-ghost btn-danger-ghost" id="logoutBtn">Cerrar Sesión</button>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <!-- Barra de navegación inferior -->
+    <nav class="bottom-nav" aria-label="Navegación principal">
+      <button type="button" class="tab-btn active" data-tab="saldo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <span>Saldo</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="pago">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/></svg>
+        <span>Pagar</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="recarga">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <span>Recarga</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="historial">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>Historial</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="cuenta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Cuenta</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- =========================================================================
+       MODAL GUÍA VISUAL ILUSTRADA DE 2 PASOS (TARJETA TNE DETRÁS DEL CELULAR)
+       ========================================================================= -->
+  <div class="modal-backdrop" id="nfcGuideModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="nfcGuideTitle">
+    <div class="modal-card nfc-guide-card">
+      <div class="nfc-guide-header">
+        <span class="nfc-guide-badge">LECTURA SIN CONTACTO NFC</span>
+        <h2 id="nfcGuideTitle" class="modal-title">Vincular TNE</h2>
+      </div>
+
+      <!-- PASO 1: El celular y la tarjeta TNE en portada -->
+      <div class="nfc-step-row">
+        <div class="nfc-illustration-box">
+          <div class="illus-backdrop"></div>
+          <div class="illus-phone">
+            <div class="illus-notch"></div>
+            <div class="illus-screen">
+              <div class="illus-app-bar"></div>
+              <div class="illus-app-line"></div>
+            </div>
+          </div>
+          <!-- Tarjeta TNE flotando al frente (Paso 1) -->
+          <div class="illus-tne-card step1-card">
+            <span class="illus-tne-tag">TNE</span>
+            <div class="illus-tne-chip"></div>
+          </div>
+        </div>
+        <div class="nfc-step-text">
+          <span class="step-big-num">1</span>
+          <p>Activa el <strong>NFC</strong> de tu teléfono y ten tu <strong>TNE física</strong> a mano.</p>
         </div>
       </div>
+
+      <!-- PASO 2: La tarjeta TNE colocada DETRÁS del celular -->
+      <div class="nfc-step-row reverse">
+        <div class="nfc-step-text">
+          <span class="step-big-num">2</span>
+          <p><strong>Ponga su TNE detrás del celular</strong> y manténgala firme unos segundos.</p>
+        </div>
+        <div class="nfc-illustration-box">
+          <div class="illus-backdrop"></div>
+          <!-- Ondas de lectura NFC -->
+          <div class="illus-nfc-waves"></div>
+          <!-- Tarjeta TNE posicionada DETRÁS del teléfono -->
+          <div class="illus-tne-card step2-card-behind">
+            <span class="illus-tne-tag">TNE</span>
+            <div class="illus-tne-chip"></div>
+          </div>
+          <!-- Teléfono por delante tapando parcialmente la tarjeta -->
+          <div class="illus-phone front-phone">
+            <div class="illus-notch"></div>
+            <div class="illus-screen scanning">
+              <div class="illus-scan-check">📡</div>
+              <div class="illus-scan-bar">Detectando TNE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Estado en vivo del escaneo NFC -->
+      <div class="nfc-live-status" id="nfcLiveStatusBox">
+        <span class="nfc-pulse-dot"></span>
+        <span id="nfcLiveStatusText">Ponga su TNE detrás del celular...</span>
+      </div>
+
+      <button type="button" class="btn-secondary" id="closeNfcGuideBtn">
+        Cancelar
+      </button>
     </div>
   </div>
 
-  <script>
-    const SUPABASE_URL = "https://yrbdxblbeezqqlubbxcf.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_cNpSzGUBVe0trfYXppsgRg_mWHzJafw";
-    const TARIFA_ESCOLAR = 200;
-    const TARIFA_ADULTO_REF = 760;
-
-    const headersSupabase = {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json"
-    };
-
-    const ZONAS_MAPA = {
-      "Playa Ancha": { cx: 38, cy: 52, coords: "-33.028, -71.641" },
-      "Plan de Valparaíso": { cx: 105, cy: 72, coords: "-33.045, -71.619" },
-      "Cerro Barón": { cx: 165, cy: 78, coords: "-33.048, -71.605" },
-      "Av. España": { cx: 245, cy: 54, coords: "-33.034, -71.585" },
-      "Viña del Mar": { cx: 330, cy: 30, coords: "-33.015, -71.549" },
-      "Placilla": { cx: 195, cy: 124, coords: "-33.116, -71.571" }
-    };
-
-    const prefersDarkOS = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const savedTheme = localStorage.getItem("tne_dark_mode");
-
-    let state = {
-      sesionActiva: localStorage.getItem("tne_sesion_activa") === "true",
-      uid: localStorage.getItem("tne_uid_activo") || "",
-      nombre: localStorage.getItem("tne_nombre") || "",
-      rut: localStorage.getItem("tne_rut") || "",
-      correo: localStorage.getItem("tne_correo") || "",
-      institucion: localStorage.getItem("tne_institucion") || "Educación Superior",
-      saldo: null,
-      ocultarSaldo: localStorage.getItem("tne_ocultar_saldo") === "true",
-      darkMode: savedTheme !== null ? savedTheme === "true" : prefersDarkOS,
-      tarjetaCongelada: localStorage.getItem("tne_congelada") === "true",
-      prestamoEmergencia: localStorage.getItem("tne_prestamo_activo") === "true",
-      estado: "Activo",
-      bloqueoCobro: false,
-      notificadoSaldoBajo: false,
-      ultimaZona: localStorage.getItem("tne_ultima_zona") || "Plan de Valparaíso · Av. Brasil (-33.045, -71.619)",
-      historial: JSON.parse(localStorage.getItem("tne_historial_web") || "[]")
-    };
-
-    const syncIndicator = document.getElementById("syncIndicator");
-    const netModeBadge = document.getElementById("netModeBadge");
-    const studentNameLabel = document.getElementById("studentNameLabel");
-    const studentMetaLabel = document.getElementById("studentMetaLabel");
-    const currentUidLabel = document.getElementById("currentUidLabel");
-    const cardStatusBadge = document.getElementById("cardStatusBadge");
-    const balanceDisplay = document.getElementById("balanceDisplay");
-    const tripsLeftLabel = document.getElementById("tripsLeftLabel");
-    const fareMetaBox = document.getElementById("fareMetaBox");
-    const validatorStage = document.getElementById("validatorStage");
-    const stageIcon = document.getElementById("stageIcon");
-    const stageTitle = document.getElementById("stageTitle");
-    const stageSubtitle = document.getElementById("stageSubtitle");
-    const historyList = document.getElementById("historyList");
-    const homeMiniHistory = document.getElementById("homeMiniHistory");
-    const footerMessage = document.getElementById("footerMessage");
-    const registerAlert = document.getElementById("registerAlert");
-    const eyeSvgIcon = document.getElementById("eyeSvgIcon");
-    const eyeLabel = document.getElementById("eyeLabel");
-    const statSavingsValue = document.getElementById("statSavingsValue");
-    const statTripsCount = document.getElementById("statTripsCount");
-    const cooldownBanner = document.getElementById("cooldownBanner");
-    const cooldownTimerText = document.getElementById("cooldownTimerText");
-    const lowBalanceBanner = document.getElementById("lowBalanceBanner");
-    const frozenCardBanner = document.getElementById("frozenCardBanner");
-    const emergencyLoanBtn = document.getElementById("emergencyLoanBtn");
-    const loanPendingAlert = document.getElementById("loanPendingAlert");
-
-    function aplicarModoOscuro() {
-      document.body.classList.toggle("dark-mode", state.darkMode);
-      document.getElementById("themeIcon").textContent = state.darkMode ? "☀️" : "🌙";
-    }
-
-    document.getElementById("darkModeToggleBtn").addEventListener("click", () => {
-      state.darkMode = !state.darkMode;
-      localStorage.setItem("tne_dark_mode", String(state.darkMode));
-      aplicarModoOscuro();
-    });
-    aplicarModoOscuro();
-
-    function mostrarPestana(nombrePestana) {
-      if (!state.sesionActiva && nombrePestana !== "cuenta") {
-        loginModalBackdrop.classList.add("open");
-        alert("Debes iniciar sesión o registrar tu cuenta TNE para acceder a esta sección.");
-        return;
-      }
-      document.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.tab === nombrePestana);
-      });
-      document.querySelectorAll(".view-panel").forEach((panel) => {
-        panel.classList.toggle("active", panel.id === `view-${nombrePestana}`);
-      });
-      if (nombrePestana === "cuenta") {
-        document.getElementById("regUid").value = state.uid;
-        if (state.nombre && state.nombre !== "Estudiante TNE") document.getElementById("regNombre").value = state.nombre;
-        if (state.rut) document.getElementById("regRut").value = state.rut;
-        if (state.correo) document.getElementById("regCorreo").value = state.correo;
-      }
-    }
-
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => mostrarPestana(btn.dataset.tab));
-    });
-
-    document.getElementById("enablePushBtn").addEventListener("click", async () => {
-      if (!("Notification" in window)) {
-        alert("Las alertas están activas mediante el banner superior de la aplicación.");
-        return;
-      }
-      const perm = await Notification.requestPermission();
-      if (perm === "granted") {
-        new Notification("Mi Pase TNE · Alertas Activas", {
-          body: "Te avisaremos automáticamente cuando tu saldo baje de 2 viajes ($400 CLP)."
-        });
-      }
-    });
-
-    function dispararNotificacionSaldoBajo(saldoActual) {
-      if (state.notificadoSaldoBajo) return;
-      state.notificadoSaldoBajo = true;
-      if ("Notification" in window && Notification.permission === "granted") {
-        new Notification("⚠️ Saldo Bajo en tu TNE", {
-          body: `Tu saldo actual es ${formatearPesos(saldoActual)} (menos de 2 viajes). Recarga o activa el Préstamo Escolar.`
-        });
-      }
-    }
-
-    function reproducirSonido(aprobado) {
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioCtx();
-        if (aprobado) {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(2100, ctx.currentTime);
-          gain.gain.setValueAtTime(0.18, ctx.currentTime);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.18);
-        } else {
-          [0, 0.22].forEach((offset) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = "sawtooth";
-            osc.frequency.setValueAtTime(340, ctx.currentTime + offset);
-            gain.gain.setValueAtTime(0.18, ctx.currentTime + offset);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + offset);
-            osc.stop(ctx.currentTime + offset + 0.16);
-          });
-        }
-      } catch (e) {}
-    }
-
-    function formatearPesos(valor) {
-      const n = Number(valor) || 0;
-      if (n < 0) return "-$" + Math.abs(n).toLocaleString("es-CL");
-      return "$" + n.toLocaleString("es-CL");
-    }
-
-    function guardarPerfilLocal() {
-      localStorage.setItem("tne_uid_activo", state.uid);
-      localStorage.setItem("tne_nombre", state.nombre);
-      localStorage.setItem("tne_rut", state.rut);
-      localStorage.setItem("tne_correo", state.correo);
-      localStorage.setItem("tne_institucion", state.institucion);
-      localStorage.setItem("tne_ocultar_saldo", String(state.ocultarSaldo));
-      localStorage.setItem("tne_congelada", String(state.tarjetaCongelada));
-      localStorage.setItem("tne_prestamo_activo", String(state.prestamoEmergencia));
-      localStorage.setItem("tne_ultima_zona", state.ultimaZona);
-    }
-
-    function validarRut(rutCompleto) {
-      rutCompleto = rutCompleto.replace(/\./g, "").replace(/\s+/g, "").toUpperCase();
-      if (!/^[0-9]+-[0-9K]$/.test(rutCompleto)) return false;
-      const tmp = rutCompleto.split("-");
-      let cuerpo = tmp[0], dv = tmp[1];
-      if (cuerpo.length < 7 || cuerpo.length > 8) return false;
-      let suma = 0, multiplo = 2;
-      for (let i = cuerpo.length - 1; i >= 0; i--) {
-        suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
-        multiplo = multiplo === 7 ? 2 : multiplo + 1;
-      }
-      let dvEsperado = 11 - (suma % 11);
-      let dvCalculado = dvEsperado === 11 ? "0" : dvEsperado === 10 ? "K" : dvEsperado.toString();
-      return dvCalculado === dv;
-    }
-
-    const loginModalBackdrop = document.getElementById("loginModalBackdrop");
-    const loginForm = document.getElementById("loginForm");
-    const loginAlert = document.getElementById("loginAlert");
-
-    if (!state.sesionActiva || !state.uid) {
-      loginModalBackdrop.classList.add("open");
-    } else {
-      loginModalBackdrop.classList.remove("open");
-    }
-
-    document.getElementById("goToRegisterFromLogin").addEventListener("click", () => {
-      loginModalBackdrop.classList.remove("open");
-      mostrarPestana("cuenta");
-    });
-
-    loginForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      loginAlert.className = "alert-box";
-      const correo = document.getElementById("loginCorreo").value.trim();
-      const pass = document.getElementById("loginPassword").value.trim();
-
-      if (!correo || !pass) {
-        loginAlert.textContent = "Por favor ingresa tu correo y contraseña.";
-        loginAlert.className = "alert-box err";
-        return;
-      }
-
-      try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/login_tne`, {
-          method: "POST",
-          headers: headersSupabase,
-          body: JSON.stringify({ p_correo: correo, p_password: pass })
-        });
-        const data = await res.json();
-
-        if (data && data.status === "exito") {
-          state.sesionActiva = true;
-          state.correo = data.correo;
-          state.uid = data.uid;
-          state.nombre = data.nombre;
-          state.rut = data.rut;
-          state.institucion = data.institucion;
-          state.saldo = data.saldo;
-          state.estado = data.estado;
-          localStorage.setItem("tne_sesion_activa", "true");
-          guardarPerfilLocal();
-          loginModalBackdrop.classList.remove("open");
-          actualizarTarjetaUI();
-          consultarSaldoEnNube();
-          alert(`¡Inicio de sesión exitoso! Bienvenido/a ${state.nombre}.`);
-        } else {
-          loginAlert.textContent = (data && data.mensaje) ? data.mensaje : "Correo o contraseña incorrectos (Recuerda que la contraseña son los primeros 5 dígitos de tu RUT).";
-          loginAlert.className = "alert-box err";
-        }
-      } catch (err) {
-        state.sesionActiva = true;
-        state.correo = correo;
-        if (!state.uid) state.uid = "FCDC1198";
-        localStorage.setItem("tne_sesion_activa", "true");
-        guardarPerfilLocal();
-        loginModalBackdrop.classList.remove("open");
-        actualizarTarjetaUI();
-        consultarSaldoEnNube();
-        alert(`Inicio de sesión exitoso para ${correo}.`);
-      }
-    });
-
-    document.getElementById("logoutBtn").addEventListener("click", () => {
-      localStorage.removeItem("tne_sesion_activa");
-      state.sesionActiva = false;
-      state.uid = "";
-      state.nombre = "";
-      state.rut = "";
-      state.correo = "";
-      loginModalBackdrop.classList.add("open");
-    });
-
-    document.getElementById("toggleBalanceBtn").addEventListener("click", () => {
-      state.ocultarSaldo = !state.ocultarSaldo;
-      guardarPerfilLocal();
-      actualizarTarjetaUI();
-      renderizarHistorial();
-    });
-
-    function activarEscudoAntiDobleCobro() {
-      state.bloqueoCobro = true;
-      const payBtn = document.getElementById("payWebBtn");
-      payBtn.disabled = true;
-      let segs = 3;
-      cooldownBanner.classList.add("active");
-      cooldownTimerText.textContent = `${segs}s`;
-
-      const interval = setInterval(() => {
-        segs -= 1;
-        if (segs > 0) {
-          cooldownTimerText.textContent = `${segs}s`;
-        } else {
-          clearInterval(interval);
-          state.bloqueoCobro = false;
-          payBtn.disabled = false;
-          cooldownBanner.classList.remove("active");
-        }
-      }, 1000);
-    }
-
-    const busZoneSelect = document.getElementById("busZoneSelect");
-    busZoneSelect.addEventListener("change", () => {
-      state.ultimaZona = busZoneSelect.value;
-      guardarPerfilLocal();
-      actualizarPinMapa(state.ultimaZona);
-    });
-
-    document.getElementById("detectGpsBtn").addEventListener("click", () => {
-      if (!navigator.geolocation) {
-        alert("Tu navegador no soporta geolocalización directa. Selecciona el sector en la lista.");
-        return;
-      }
-      footerMessage.textContent = "Obteniendo coordenadas GPS del Gran Valparaíso...";
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = pos.coords.latitude.toFixed(3);
-          const lon = pos.coords.longitude.toFixed(3);
-          const customOption = document.createElement("option");
-          customOption.value = `GPS Cabina Valparaíso (${lat}, ${lon})`;
-          customOption.textContent = `📍 Ubicación GPS Actual (${lat}, ${lon})`;
-          busZoneSelect.prepend(customOption);
-          busZoneSelect.selectedIndex = 0;
-          state.ultimaZona = customOption.value;
-          guardarPerfilLocal();
-          footerMessage.textContent = `📍 Ubicación GPS fijada: ${lat}, ${lon}`;
-        },
-        () => {
-          footerMessage.textContent = "Permiso GPS no concedido. Usando sector seleccionado.";
-        }
-      );
-    });
-
-    function actualizarPinMapa(textoZona) {
-      const pulse = document.getElementById("lastTripMapPulse");
-      const dot = document.getElementById("lastTripMapDot");
-      const coordsLabel = document.getElementById("lastGeoCoordsLabel");
-
-      for (const clave of Object.keys(ZONAS_MAPA)) {
-        if (textoZona.includes(clave)) {
-          const nodo = ZONAS_MAPA[clave];
-          pulse.setAttribute("cx", nodo.cx);
-          pulse.setAttribute("cy", nodo.cy);
-          dot.setAttribute("cx", nodo.cx);
-          dot.setAttribute("cy", nodo.cy);
-          coordsLabel.textContent = `${clave} (${nodo.coords})`;
-          document.getElementById("statLastZone").textContent = `${clave} · Gran Valparaíso`;
-          return;
-        }
-      }
-    }
-
-    function registrarMovimiento(titulo, monto, saldoFinal, zona = state.ultimaZona) {
-      const item = {
-        hora: new Date().toLocaleTimeString("es-CL"),
-        titulo,
-        monto,
-        saldoFinal,
-        zona: zona || "Plan de Valparaíso · Av. Brasil (-33.045, -71.619)"
-      };
-      state.historial.unshift(item);
-      state.historial = state.historial.slice(0, 25);
-      localStorage.setItem("tne_historial_web", JSON.stringify(state.historial));
-      actualizarPinMapa(item.zona);
-      renderizarHistorial();
-    }
-
-    function renderizarHistorial() {
-      const viajesRealizados = state.historial.filter((m) => m.monto < 0).length;
-      const ahorroTotal = viajesRealizados * (TARIFA_ADULTO_REF - TARIFA_ESCOLAR);
-      statTripsCount.textContent = `${viajesRealizados} ${viajesRealizados === 1 ? "viaje" : "viajes"}`;
-      statSavingsValue.textContent = state.ocultarSaldo ? "$ ••••" : formatearPesos(ahorroTotal);
-
-      if (!state.historial.length) {
-        const emptyHtml = `
-          <li class="history-item">
-            <div class="history-left">
-              <span class="history-title">Sin movimientos recientes</span>
-              <span class="history-time">Esperando cobro en Arduino o Web...</span>
-            </div>
-            <span class="history-amount">---</span>
-          </li>`;
-        historyList.innerHTML = emptyHtml;
-        homeMiniHistory.innerHTML = emptyHtml;
-        return;
-      }
-
-      const construirItemsHTML = (lista) => lista.map((mov) => {
-        const esPositivo = mov.monto > 0;
-        const claseMonto = esPositivo ? "pos" : "neg";
-        const signo = esPositivo ? "+" : "";
-        const saldoMostrado = state.ocultarSaldo ? "$ ••••••" : formatearPesos(mov.saldoFinal);
-        const zonaTexto = mov.zona ? `<span class="history-geo">📍 ${mov.zona}</span>` : "";
-        return `
-          <li class="history-item">
-            <div class="history-left">
-              <span class="history-title">${mov.titulo}</span>
-              <span class="history-time">${mov.hora} · Saldo: ${saldoMostrado}</span>
-              ${zonaTexto}
-            </div>
-            <span class="history-amount ${claseMonto}">${signo}${formatearPesos(mov.monto)}</span>
-          </li>
-        `;
-      }).join("");
-
-      historyList.innerHTML = construirItemsHTML(state.historial);
-      homeMiniHistory.innerHTML = construirItemsHTML(state.historial.slice(0, 2));
-    }
-
-    document.getElementById("clearHistoryBtn").addEventListener("click", () => {
-      state.historial = [];
-      localStorage.setItem("tne_historial_web", "[]");
-      renderizarHistorial();
-    });
-
-    function actualizarTarjetaUI() {
-      const nombreLimpio = (state.nombre && state.nombre.trim().length > 1) ? state.nombre : "Titular TNE Vinculado";
-      studentNameLabel.textContent = nombreLimpio;
-
-      const rutTexto = state.rut ? `RUT ${state.rut}` : "Cuenta vinculada";
-      studentMetaLabel.textContent = `${state.institucion || "Educación Superior"} · ${rutTexto}`;
-      currentUidLabel.textContent = `UID: ${state.uid}`;
-
-      document.getElementById("pagoUidPreview").textContent = state.uid;
-      document.getElementById("recargaUidPreview").textContent = state.uid;
-      document.getElementById("widgetUidPill").textContent = `UID: ${state.uid}`;
-
-      const saldoBase = state.saldo !== null ? state.saldo : 0;
-      const saldoMostradoReal = state.prestamoEmergencia ? -TARIFA_ESCOLAR : saldoBase;
-      const viajes = Math.max(0, Math.floor(saldoMostradoReal / TARIFA_ESCOLAR));
-
-      balanceDisplay.classList.toggle("negative-loan", saldoMostradoReal < 0);
-
-      if (state.ocultarSaldo) {
-        balanceDisplay.textContent = "$ ••••••";
-        balanceDisplay.classList.add("masked");
-        tripsLeftLabel.textContent = "Viajes disponibles: ••••";
-        document.getElementById("pagoBalancePreview").textContent = "$ ••••••";
-        document.getElementById("recargaBalancePreview").textContent = "$ ••••••";
-        document.getElementById("widgetBalanceText").textContent = "$ ••••••";
-        document.getElementById("widgetTripsText").textContent = "Saldo oculto";
-        eyeSvgIcon.innerHTML = `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>`;
-        eyeLabel.textContent = "Mostrar";
-      } else {
-        balanceDisplay.textContent = formatearPesos(saldoMostradoReal);
-        balanceDisplay.classList.remove("masked");
-        tripsLeftLabel.textContent = state.prestamoEmergencia
-          ? "🆘 Préstamo Escolar activo (-$200 por descontar)"
-          : viajes === 1
-            ? "⚠ Queda 1 solo viaje disponible"
-            : `Viajes disponibles: ${viajes}`;
-        document.getElementById("pagoBalancePreview").textContent = formatearPesos(saldoMostradoReal);
-        document.getElementById("recargaBalancePreview").textContent = formatearPesos(saldoMostradoReal);
-        document.getElementById("widgetBalanceText").textContent = formatearPesos(saldoMostradoReal);
-        document.getElementById("widgetTripsText").textContent = `${viajes} viajes disponibles`;
-        eyeSvgIcon.innerHTML = `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
-        eyeLabel.textContent = "Ocultar";
-      }
-
-      const esSaldoBajo = state.sesionActiva && state.saldo !== null && saldoMostradoReal < (TARIFA_ESCOLAR * 2);
-      lowBalanceBanner.classList.toggle("visible", esSaldoBajo && !state.tarjetaCongelada);
-      if (esSaldoBajo) {
-        dispararNotificacionSaldoBajo(saldoMostradoReal);
-      } else {
-        state.notificadoSaldoBajo = false;
-      }
-
-      const puedePedirPrestamo = saldoBase < TARIFA_ESCOLAR && !state.prestamoEmergencia && !state.tarjetaCongelada;
-      emergencyLoanBtn.classList.toggle("visible", puedePedirPrestamo);
-      document.getElementById("bannerEmergencyBtn").style.display = puedePedirPrestamo ? "block" : "none";
-      loanPendingAlert.style.display = state.prestamoEmergencia ? "block" : "none";
-
-      frozenCardBanner.classList.toggle("visible", state.tarjetaCongelada);
-      document.getElementById("mainTneCard").classList.toggle("is-frozen", state.tarjetaCongelada);
-      const freezeBtn = document.getElementById("toggleFreezeCardBtn");
-      const secPill = document.getElementById("securityStatePill");
-
-      if (state.tarjetaCongelada) {
-        freezeBtn.textContent = "🔓 Desbloquear y Reactivar mi TNE";
-        secPill.textContent = "CONGELADA";
-        secPill.className = "status-pill err";
-        cardStatusBadge.textContent = "BLOQUEADA";
-        cardStatusBadge.className = "status-pill err";
-        return;
-      } else {
-        freezeBtn.textContent = "🔒 Bloquear / Congelar TNE por Extravío";
-        secPill.textContent = "PROTEGIDA";
-        secPill.className = "status-pill ok";
-      }
-
-      fareMetaBox.classList.toggle("critical-balance", !state.ocultarSaldo && viajes <= 1);
-
-      if (state.estado === "Activo" && saldoMostradoReal >= TARIFA_ESCOLAR * 2) {
-        cardStatusBadge.textContent = "ACTIVO";
-        cardStatusBadge.className = "status-pill ok";
-      } else if (state.estado === "Activo" && saldoMostradoReal >= TARIFA_ESCOLAR) {
-        cardStatusBadge.textContent = "SALDO BAJO";
-        cardStatusBadge.className = "status-pill warn";
-      } else if (state.prestamoEmergencia) {
-        cardStatusBadge.textContent = "EN PRÉSTAMO";
-        cardStatusBadge.className = "status-pill warn";
-      } else if (state.estado === "No registrado") {
-        cardStatusBadge.textContent = "SIN VINCULAR";
-        cardStatusBadge.className = "status-pill err";
-      } else {
-        cardStatusBadge.textContent = "SIN SALDO";
-        cardStatusBadge.className = "status-pill err";
-      }
-    }
-
-    let temporizadorPantalla = null;
-    function mostrarEstadoValidador(tipo, titulo, subtitulo) {
-      clearTimeout(temporizadorPantalla);
-      validatorStage.className = `validator-stage state-${tipo}`;
-      stageTitle.textContent = titulo;
-      stageSubtitle.textContent = subtitulo;
-
-      if (tipo === "aprobado") {
-        stageIcon.innerHTML = `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-      } else if (tipo === "rechazado") {
-        stageIcon.innerHTML = `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-      } else {
-        stageIcon.innerHTML = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><path d="M2 12a2 2 0 0 1 2-2"/><rect x="6" y="8" width="16" height="12" rx="2"/></svg>`;
-      }
-
-      if (tipo !== "espera") {
-        temporizadorPantalla = setTimeout(() => {
-          mostrarEstadoValidador(
-            "espera",
-            "Acerca tu TNE al Validador",
-            "Pasa tu TNE física por el lector del Arduino o usa el botón de abajo. El saldo se descuenta en vivo."
-          );
-        }, 3200);
-      }
-    }
-
-    let qrInterval = null;
-    const qrModalBackdrop = document.getElementById("qrModalBackdrop");
-    const qrCanvas = document.getElementById("qrCanvas");
-    const widgetQrCanvas = document.getElementById("widgetQrCanvas");
-    const qrTimerLabel = document.getElementById("qrTimerLabel");
-    const qrUidText = document.getElementById("qrUidText");
-    const widgetModalBackdrop = document.getElementById("widgetModalBackdrop");
-
-    function dibujarPatronQR(canvasEl, semillaTexto) {
-      const ctx = canvasEl.getContext("2d");
-      const size = 21;
-      const cell = Math.floor(canvasEl.width / size);
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
-      ctx.fillStyle = "#102A43";
-
-      let hash = 2166136261;
-      for (let i = 0; i < semillaTexto.length; i++) {
-        hash ^= semillaTexto.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-      }
-
-      const dibujarFinder = (ox, oy) => {
-        for (let r = 0; r < 7; r++) {
-          for (let c = 0; c < 7; c++) {
-            const borde = r === 0 || r === 6 || c === 0 || c === 6;
-            const centro = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-            if (borde || centro) ctx.fillRect((ox + c) * cell, (oy + r) * cell, cell, cell);
-          }
-        }
-      };
-
-      dibujarFinder(0, 0);
-      dibujarFinder(size - 7, 0);
-      dibujarFinder(0, size - 7);
-
-      for (let r = 0; r < size; r++) {
-        for (let c = 0; c < size; c++) {
-          const enFinder = (r < 8 && c < 8) || (r < 8 && c >= size - 8) || (r >= size - 8 && c < 8);
-          if (enFinder) continue;
-          hash ^= (r * 31 + c * 17) & 0xff;
-          hash = Math.imul(hash, 16777619);
-          if ((Math.abs(hash) % 10) < 5) ctx.fillRect(c * cell, r * cell, cell, cell);
-        }
-      }
-    }
-
-    function abrirModalQr() {
-      qrModalBackdrop.classList.add("open");
-      qrUidText.textContent = `UID: ${state.uid} · ${state.nombre}`;
-      let restante = 60;
-      dibujarPatronQR(qrCanvas, `${state.uid}-${Date.now()}`);
-      qrTimerLabel.textContent = `Código firmado · Expira en ${restante}s`;
-
-      clearInterval(qrInterval);
-      qrInterval = setInterval(() => {
-        restante -= 1;
-        if (restante <= 0) {
-          restante = 60;
-          dibujarPatronQR(qrCanvas, `${state.uid}-${Date.now()}`);
-        }
-        qrTimerLabel.textContent = `Código firmado · Expira en ${restante}s`;
-      }, 1000);
-    }
-
-    document.getElementById("openQrModalBtn").addEventListener("click", abrirModalQr);
-    document.getElementById("closeQrModalBtn").addEventListener("click", () => {
-      qrModalBackdrop.classList.remove("open");
-      clearInterval(qrInterval);
-    });
-
-    document.getElementById("openWidgetBtn").addEventListener("click", () => {
-      actualizarTarjetaUI();
-      dibujarPatronQR(widgetQrCanvas, `${state.uid}-WIDGET`);
-      widgetModalBackdrop.classList.add("open");
-    });
-
-    document.getElementById("closeWidgetModalBtn").addEventListener("click", () => {
-      widgetModalBackdrop.classList.remove("open");
-    });
-
-    document.getElementById("widgetShowQrBtn").addEventListener("click", () => {
-      widgetModalBackdrop.classList.remove("open");
-      abrirModalQr();
-    });
-
-    document.getElementById("widgetOpenFullQr").addEventListener("click", () => {
-      widgetModalBackdrop.classList.remove("open");
-      abrirModalQr();
-    });
-
-    document.getElementById("widgetQuickPayBtn").addEventListener("click", async () => {
-      widgetModalBackdrop.classList.remove("open");
-      mostrarPestana("pago");
-      await descontarSaldoDesdeWeb();
-    });
-
-    async function cambiarEstadoCongelamiento() {
-      state.tarjetaCongelada = !state.tarjetaCongelada;
-      const nuevoEstadoBD = state.tarjetaCongelada ? "Bloqueado" : "Activo";
-      state.estado = nuevoEstadoBD;
-      guardarPerfilLocal();
-      actualizarTarjetaUI();
-
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}`, {
-          method: "PATCH",
-          headers: headersSupabase,
-          body: JSON.stringify({ estado: nuevoEstadoBD })
-        });
-      } catch (e) {}
-
-      const alertBox = document.getElementById("securityAlertBox");
-      if (state.tarjetaCongelada) {
-        reproducirSonido(false);
-        alertBox.textContent = `🔒 Tarjeta ${state.uid} congelada con éxito. Ningún validador podrá descontar tu saldo.`;
-        alertBox.className = "alert-box err";
-      } else {
-        reproducirSonido(true);
-        alertBox.textContent = `🔓 Tarjeta ${state.uid} desbloqueada y lista para viajar.`;
-        alertBox.className = "alert-box ok";
-      }
-    }
-
-    document.getElementById("toggleFreezeCardBtn").addEventListener("click", cambiarEstadoCongelamiento);
-    document.getElementById("quickUnfreezeBtn").addEventListener("click", cambiarEstadoCongelamiento);
-
-    document.getElementById("transferUidBtn").addEventListener("click", async () => {
-      const nuevoUid = document.getElementById("replaceUidInput").value.toUpperCase().replace(/[^0-9A-F]/g, "");
-      const alertBox = document.getElementById("securityAlertBox");
-
-      if (nuevoUid.length !== 8 || nuevoUid === state.uid) {
-        alertBox.textContent = "Ingresa un código UID nuevo de 8 caracteres hexadecimales distinto al actual.";
-        alertBox.className = "alert-box err";
-        return;
-      }
-
-      const uidAntiguo = state.uid;
-      const saldoResguardado = state.saldo !== null ? state.saldo : 1000;
-
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidAntiguo)}`, {
-          method: "PATCH",
-          headers: headersSupabase,
-          body: JSON.stringify({ estado: "Extraviada", saldo: 0 })
-        });
-
-        await fetch(`${SUPABASE_URL}/rest/v1/tarjetas_autorizadas`, {
-          method: "POST",
-          headers: { ...headersSupabase, "Prefer": "resolution=merge-duplicates,return=representation" },
-          body: JSON.stringify({
-            uid: nuevoUid,
-            estado: "Activo",
-            saldo: saldoResguardado,
-            nombre: state.nombre,
-            rut: state.rut,
-            correo: state.correo,
-            institucion: state.institucion
-          })
-        });
-      } catch (e) {}
-
-      state.uid = nuevoUid;
-      state.tarjetaCongelada = false;
-      state.estado = "Activo";
-      guardarPerfilLocal();
-      actualizarTarjetaUI();
-      reproducirSonido(true);
-      registrarMovimiento(`Reposición TNE (${uidAntiguo} → ${nuevoUid})`, 0, saldoResguardado);
-      document.getElementById("replaceUidInput").value = "";
-      alertBox.textContent = `✔ ¡Saldo de ${formatearPesos(saldoResguardado)} transferido con éxito al nuevo UID ${nuevoUid}!`;
-      alertBox.className = "alert-box ok";
-    });
-
-    document.getElementById("registerForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      registerAlert.className = "alert-box";
-
-      const nombre = document.getElementById("regNombre").value.trim();
-      const rut = document.getElementById("regRut").value.trim();
-      const correo = document.getElementById("regCorreo").value.trim();
-      const institucion = document.getElementById("regInstitucion").value;
-      const uidLimpio = document.getElementById("regUid").value.toUpperCase().replace(/[^0-9A-F]/g, "");
-      const saldoInicial = parseInt(document.getElementById("regSaldoInicial").value, 10) || 1000;
-
-      if (!validarRut(rut)) {
-        registerAlert.textContent = "El RUT ingresado no es válido. Verifica el formato y dígito verificador (Ej: 21345678-9).";
-        registerAlert.className = "alert-box err";
-        return;
-      }
-
-      const rutClean = rut.replace(/[^0-9]/g, "");
-      const password = rutClean.substring(0, 5);
-      if (password.length < 5) {
-        registerAlert.textContent = "El RUT debe contener al menos 5 dígitos numéricos para generar la contraseña.";
-        registerAlert.className = "alert-box err";
-        return;
-      }
-
-      if (uidLimpio.length !== 8) {
-        registerAlert.textContent = "El UID de la tarjeta debe tener exactamente 8 caracteres hexadecimales (0-9, A-F) para que el Arduino la acepte.";
-        registerAlert.className = "alert-box err";
-        return;
-      }
-
-      const submitBtn = document.getElementById("submitRegBtn");
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Vinculando TNE en Supabase...";
-
-      try {
-        let activadaEnServidor = false;
-
-        const resRpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/registrar_cuenta_tne`, {
-          method: "POST",
-          headers: headersSupabase,
-          body: JSON.stringify({
-            p_uid: uidLimpio,
-            p_nombre: nombre,
-            p_rut: rut,
-            p_correo: correo,
-            p_institucion: institucion,
-            p_saldo_inicial: saldoInicial,
-            p_password: password
-          })
-        });
-
-        if (resRpc.ok) {
-          const dataRpc = await resRpc.json();
-          if (dataRpc && dataRpc.status === "exito") {
-            activadaEnServidor = true;
-            state.saldo = dataRpc.saldo;
-          }
-        }
-
-        if (!activadaEnServidor) {
-          const resTabla = await fetch(`${SUPABASE_URL}/rest/v1/tarjetas_autorizadas`, {
-            method: "POST",
-            headers: { ...headersSupabase, "Prefer": "resolution=merge-duplicates,return=representation" },
-            body: JSON.stringify({
-              uid: uidLimpio,
-              estado: "Activo",
-              saldo: saldoInicial,
-              nombre: nombre,
-              rut: rut,
-              correo: correo,
-              institucion: institucion,
-              password: password
-            })
-          });
-
-          if (resTabla.ok) {
-            activadaEnServidor = true;
-            state.saldo = saldoInicial;
-          } else {
-            const resRecarga = await fetch(`${SUPABASE_URL}/rest/v1/rpc/recargar_saldo`, {
-              method: "POST",
-              headers: headersSupabase,
-              body: JSON.stringify({ card_uid: uidLimpio, monto: saldoInicial })
-            });
-            const dataRec = await resRecarga.json();
-            if (dataRec && dataRec.status === "exito") activadaEnServidor = true;
-          }
-        }
-
-        state.uid = uidLimpio;
-        state.nombre = nombre;
-        state.rut = rut;
-        state.correo = correo;
-        state.institucion = institucion;
-        state.estado = "Activo";
-        state.tarjetaCongelada = false;
-        state.prestamoEmergencia = false;
-        state.sesionActiva = true;
-        localStorage.setItem("tne_sesion_activa", "true");
-        if (state.saldo === null) state.saldo = saldoInicial;
-        guardarPerfilLocal();
-        actualizarTarjetaUI();
-
-        if (activadaEnServidor) {
-          reproducirSonido(true);
-          registrarMovimiento(`Cuenta creada (${uidLimpio})`, saldoInicial, state.saldo);
-          registerAlert.textContent = `¡Cuenta creada con éxito! 📧 Se ha enviado un correo de verificación y bienvenida a ${correo}. La TNE ${uidLimpio} quedó ACTIVA.`;
-          registerAlert.className = "alert-box ok";
-          alert(`📧 Correo de verificación y bienvenida enviado a ${correo}`);
-          await consultarSaldoEnNube();
-          setTimeout(() => mostrarPestana("saldo"), 1300);
-        } else {
-          registerAlert.textContent = `Perfil guardado localmente, 📧 correo enviado a ${correo}. Nota: Supabase requiere ejecutar el bloque SQL de registro.`;
-          registerAlert.className = "alert-box err";
-        }
-      } catch (err) {
-        registerAlert.textContent = "Error de conexión al intentar registrar la TNE en Supabase.";
-        registerAlert.className = "alert-box err";
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "Crear Cuenta y Habilitar TNE";
-      }
-    });
-
-    document.querySelectorAll("[data-fill-uid]").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        document.getElementById("regUid").value = chip.dataset.fillUid;
-      });
-    });
-
-    document.getElementById("switchUidBtn").addEventListener("click", () => {
-      const uid = document.getElementById("switchUidInput").value.toUpperCase().replace(/[^0-9A-F]/g, "");
-      if (uid.length !== 8) {
-        alert("Ingresa un UID válido de 8 caracteres hexadecimales.");
-        return;
-      }
-      state.uid = uid;
-      state.saldo = null;
-      state.tarjetaCongelada = false;
-      guardarPerfilLocal();
-      actualizarTarjetaUI();
-      consultarSaldoEnNube();
-      mostrarPestana("saldo");
-    });
-
-    async function consultarSaldoEnNube() {
-      if (!state.uid) return;
-      try {
-        const url = `${SUPABASE_URL}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}&select=*`;
-        const res = await fetch(url, { headers: headersSupabase, cache: "no-store" });
-        const lista = await res.json();
-
-        netModeBadge.textContent = "Online";
-        netModeBadge.classList.remove("offline");
-
-        if (Array.isArray(lista) && lista.length > 0) {
-          const datos = lista[0];
-
-          if (datos.nombre && datos.nombre !== "Estudiante TNE") state.nombre = datos.nombre;
-          if (datos.rut) state.rut = datos.rut;
-          if (datos.institucion) state.institucion = datos.institucion;
-
-          if (datos.estado === "Bloqueado" || datos.estado === "Extraviada") {
-            state.tarjetaCongelada = true;
-          }
-
-          if (state.saldo !== null && typeof datos.saldo === "number" && datos.saldo < state.saldo) {
-            const descuento = datos.saldo - state.saldo;
-            reproducirSonido(true);
-            activarEscudoAntiDobleCobro();
-            mostrarPestana("pago");
-            const saldoTexto = state.ocultarSaldo ? "$ ••••••" : formatearPesos(datos.saldo);
-            mostrarEstadoValidador(
-              "aprobado",
-              "¡Pago Aprobado en Micro! (-$200)",
-              `TNE ${state.uid} validada en Arduino · Saldo restante: ${saldoTexto}`
-            );
-            registrarMovimiento("Validación en Arduino (TNE)", descuento, datos.saldo, state.ultimaZona);
-          } else if (state.saldo !== null && typeof datos.saldo === "number" && datos.saldo > state.saldo) {
-            const abono = datos.saldo - state.saldo;
-            registrarMovimiento("Recarga sincronizada", abono, datos.saldo, state.ultimaZona);
-          }
-
-          state.saldo = datos.saldo;
-          state.estado = datos.estado || "Activo";
-          syncIndicator.textContent = `● TNE ${state.uid} activa en Supabase`;
-          guardarPerfilLocal();
-          actualizarTarjetaUI();
-        } else {
-          state.estado = "No registrado";
-          syncIndicator.textContent = `⚠ UID ${state.uid} aún no vinculado — Ve a 'Cuenta'`;
-          actualizarTarjetaUI();
-        }
-      } catch (e) {
-        syncIndicator.textContent = "Modo Offline Cabina (Cola local activa)";
-        netModeBadge.textContent = "Offline";
-        netModeBadge.classList.add("offline");
-      }
-    }
-
-    async function recargarSaldo(monto) {
-      const valorBruto = parseInt(monto, 10);
-      if (!valorBruto || valorBruto <= 0) return;
-
-      const habiaPrestamo = state.prestamoEmergencia;
-      const montoEfectivo = habiaPrestamo ? Math.max(0, valorBruto - TARIFA_ESCOLAR) : valorBruto;
-
-      footerMessage.textContent = `Recargando ${formatearPesos(valorBruto)} a la TNE ${state.uid}...`;
-      try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/recargar_saldo`, {
-          method: "POST",
-          headers: headersSupabase,
-          body: JSON.stringify({ card_uid: state.uid, monto: montoEfectivo })
-        });
-        const data = await res.json();
-
-        if (data && data.status === "exito") {
-          state.prestamoEmergencia = false;
-          guardarPerfilLocal();
-          reproducirSonido(true);
-          await consultarSaldoEnNube();
-          const saldoTexto = state.ocultarSaldo ? "$ ••••••" : formatearPesos(state.saldo);
-          const detallePrestamo = habiaPrestamo ? " (Se descontaron -$200 del Préstamo Escolar)" : "";
-          mostrarEstadoValidador(
-            "aprobado",
-            `¡Recarga Exitosa! (+${formatearPesos(valorBruto)})`,
-            `Nuevo saldo: ${saldoTexto}${detallePrestamo}`
-          );
-          footerMessage.textContent = `✔ Recarga acreditada en Supabase${detallePrestamo}.`;
-        } else {
-          reproducirSonido(false);
-          mostrarPestana("pago");
-          mostrarEstadoValidador(
-            "rechazado",
-            "TNE no vinculada aún",
-            "Primero entra a la pestaña 'Cuenta' para activar esta TNE en la base de datos."
-          );
-        }
-      } catch (e) {
-        reproducirSonido(false);
-      }
-    }
-
-    async function descontarSaldoDesdeWeb() {
-      if (state.tarjetaCongelada) {
-        reproducirSonido(false);
-        mostrarEstadoValidador(
-          "rechazado",
-          "TNE Bloqueada por Extravío",
-          "Desbloquea tu tarjeta en la barra superior o en la pestaña 'Cuenta' antes de pagar."
-        );
-        return;
-      }
-
-      if (state.bloqueoCobro) return;
-      activarEscudoAntiDobleCobro();
-
-      try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/descontar_saldo`, {
-          method: "POST",
-          headers: headersSupabase,
-          body: JSON.stringify({ card_uid: state.uid })
-        });
-        const data = await res.json();
-
-        if (data && data.status === "concedido") {
-          state.saldo = data.saldo_restante;
-          actualizarTarjetaUI();
-          reproducirSonido(true);
-          registrarMovimiento("Pago desde App (-$200)", -TARIFA_ESCOLAR, data.saldo_restante, state.ultimaZona);
-          const saldoTexto = state.ocultarSaldo ? "$ ••••••" : formatearPesos(data.saldo_restante);
-          mostrarEstadoValidador(
-            "aprobado",
-            "¡Pago Aprobado! (-$200)",
-            `${state.nombre} · Saldo restante: ${saldoTexto}`
-          );
-        } else {
-          reproducirSonido(false);
-          const motivo = (data && data.mensaje) ? data.mensaje : "Saldo insuficiente ($0). Activa el Préstamo Escolar de Emergencia abajo.";
-          mostrarEstadoValidador("rechazado", "Acceso Denegado", motivo);
-          consultarSaldoEnNube();
-        }
-      } catch (e) {
-        reproducirSonido(false);
-        mostrarEstadoValidador("rechazado", "Error de Red", "No se pudo conectar con Supabase.");
-      }
-    }
-
-    function usarPrestamoEscolarEmergencia() {
-      if (state.tarjetaCongelada) {
-        alert("Tu TNE está congelada por extravío. Desbloquéala primero.");
-        return;
-      }
-      if (state.prestamoEmergencia) {
-        alert("Ya utilizaste tu viaje de emergencia. Se descontará automáticamente en tu próxima recarga.");
-        return;
-      }
-
-      state.prestamoEmergencia = true;
-      state.saldo = 0;
-      guardarPerfilLocal();
-      actualizarTarjetaUI();
-      reproducirSonido(true);
-      activarEscudoAntiDobleCobro();
-      mostrarPestana("pago");
-      registrarMovimiento("🆘 Préstamo Escolar de Emergencia", -TARIFA_ESCOLAR, -TARIFA_ESCOLAR, state.ultimaZona);
-      mostrarEstadoValidador(
-        "aprobado",
-        "¡Viaje de Emergencia Aprobado! (-$200)",
-        "Préstamo Escolar activado · Se descontará automáticamente en tu próxima recarga."
-      );
-    }
-
-    emergencyLoanBtn.addEventListener("click", usarPrestamoEscolarEmergencia);
-    document.getElementById("bannerEmergencyBtn").addEventListener("click", usarPrestamoEscolarEmergencia);
-
-    document.querySelectorAll(".btn-recharge").forEach((btn) => {
-      btn.addEventListener("click", () => recargarSaldo(btn.dataset.monto));
-    });
-
-    document.getElementById("btnRecargaCustom").addEventListener("click", () => {
-      const input = document.getElementById("customMontoInput");
-      if (input.value) {
-        recargarSaldo(input.value);
-        input.value = "";
-      }
-    });
-
-    document.getElementById("payWebBtn").addEventListener("click", descontarSaldoDesdeWeb);
-
-    async function escanearNfc(callbackUid) {
-      if (!("NDEFReader" in window)) {
-        alert("Para leer la tarjeta física con el celular, abre esta página en Google Chrome para Android con el NFC activado.");
-        return;
-      }
-      try {
-        const ndef = new NDEFReader();
-        await ndef.scan();
-        footerMessage.textContent = "Acerca tu tarjeta TNE a la parte trasera del teléfono...";
-        ndef.onreading = (event) => {
-          const uidHex = event.serialNumber.replace(/:/g, "").toUpperCase();
-          if (uidHex.length === 8) {
-            callbackUid(uidHex);
-            reproducirSonido(true);
-            footerMessage.textContent = `Tarjeta TNE leída por NFC: ${uidHex}`;
-          } else {
-            alert(`Se leyó el UID ${uidHex}, pero recuerda que el Arduino valida códigos de 8 caracteres.`);
-          }
-        };
-      } catch (e) {
-        footerMessage.textContent = "No se pudo iniciar el lector NFC.";
-      }
-    }
-
-    document.getElementById("scanNfcRegBtn").addEventListener("click", () => {
-      escanearNfc((uidHex) => {
-        document.getElementById("regUid").value = uidHex;
-      });
-    });
-
-    document.getElementById("scanNfcWalletBtn").addEventListener("click", () => {
-      escanearNfc((uidHex) => {
-        state.uid = uidHex;
-        state.saldo = null;
-        guardarPerfilLocal();
-        actualizarTarjetaUI();
-        consultarSaldoEnNube();
-      });
-    });
-
-    actualizarPinMapa(state.ultimaZona);
-    renderizarHistorial();
-    actualizarTarjetaUI();
-    consultarSaldoEnNube();
-    setInterval(consultarSaldoEnNube, 1500);
-  </script>
+  <!-- PANTALLA COMPLETA ANIMADA DE PAGO APROBADO (VERDE) O RECHAZADO (ROJA) -->
+  <div id="paymentFullOverlay" class="payment-full-overlay" role="alertdialog" aria-live="assertive" aria-hidden="true">
+    <div class="overlay-badge" id="overlayTopBadge">• PASAJE ESCOLAR TNE</div>
+    <div class="overlay-icon-circle" id="overlayIconBox"></div>
+    <h2 class="overlay-title" id="overlayTitle">¡Pasaje Aprobado!</h2>
+    <p class="overlay-subtitle" id="overlaySubtitle">Tarifa Estudiante (-$200)</p>
+
+    <div class="overlay-details-card">
+      <div class="overlay-detail-row">
+        <span>Estudiante</span>
+        <strong id="overlayStudentName">---</strong>
+      </div>
+      <div class="overlay-detail-row">
+        <span>Sector</span>
+        <strong id="overlayZoneName">Plan de Valparaíso</strong>
+      </div>
+      <div class="overlay-detail-row">
+        <span>Saldo Restante</span>
+        <strong id="overlayBalance">$0</strong>
+      </div>
+    </div>
+
+    <div class="overlay-countdown-pill">
+      Volviendo en <span id="overlayCountdownNum">3</span>s...
+    </div>
+    <div class="overlay-progress-track">
+      <div class="overlay-progress-fill" id="overlayProgressBar"></div>
+    </div>
+  </div>
+
+  <!-- Modal Inicio de Sesión -->
+  <div class="modal-backdrop" id="loginModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <div class="modal-card">
+      <h2 id="loginTitle" class="modal-title">Iniciar Sesión TNE</h2>
+      <p class="modal-desc">
+        Ingresa con tu correo para acceder a tu Pase Estudiantil.
+      </p>
+      <form id="loginForm">
+        <div class="form-group">
+          <label class="form-label" for="loginCorreo">Correo Electrónico</label>
+          <input type="email" id="loginCorreo" class="form-input" required placeholder="estudiante@alumnos.uv.cl" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginPassword">Contraseña</label>
+          <input type="password" id="loginPassword" class="form-input" required placeholder="••••••••" />
+        </div>
+        <button type="submit" class="btn-primary" style="margin-top:6px;">Ingresar</button>
+      </form>
+      <div style="text-align:center; margin-top:12px;">
+        <button type="button" class="btn-ghost" id="goToRegisterFromLogin">Crear nueva cuenta TNE</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
