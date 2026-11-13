@@ -70,6 +70,14 @@ function limpiarTextosTecnicosHistorial() {
   }
 }
 
+// Limpia todos los recuadros del formulario de registro para que solo se vea el placeholder de ejemplo
+function limpiarRecuadrosRegistro() {
+  ["regNombre", "regRut", "regInstitucion", "regCorreo", "regPassword", "regUid"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  });
+}
+
 // 1. Inicialización y carga de config.json
 async function inicializarApp() {
   try {
@@ -89,11 +97,11 @@ async function inicializarApp() {
   };
 
   limpiarTextosTecnicosHistorial();
+  limpiarRecuadrosRegistro();
   aplicarModoOscuro();
   poblarControlesDesdeConfig();
   configurarEventos();
   verificarSesionInicial();
-  rellenarFormularioCuenta();
   actualizarUI();
   renderizarHistorial();
   await consultarSaldoEnNube();
@@ -237,22 +245,6 @@ async function notificarCobroExitosoAlValidador(nuevoSaldo) {
 }
 
 // 4. Navegación y actualización de interfaz
-function rellenarFormularioCuenta() {
-  const campos = [
-    { id: "regNombre", val: state.nombre },
-    { id: "regRut", val: state.rut },
-    { id: "regInstitucion", val: state.institucion },
-    { id: "regCorreo", val: state.correo },
-    { id: "regUid", val: state.uid }
-  ];
-  campos.forEach(({ id, val }) => {
-    const input = document.getElementById(id);
-    if (input && document.activeElement !== input) {
-      input.value = val || "";
-    }
-  });
-}
-
 function mostrarPestana(tabId) {
   if (!state.sesionActiva && tabId !== "cuenta") {
     document.getElementById("loginModalBackdrop")?.classList.add("open");
@@ -260,10 +252,6 @@ function mostrarPestana(tabId) {
   }
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".view-panel").forEach((p) => p.classList.toggle("active", p.id === `view-${tabId}`));
-
-  if (tabId === "cuenta") {
-    rellenarFormularioCuenta();
-  }
 
   if (tabId === "pago") {
     anunciarCelularEnValidadorEspecifico(true);
@@ -397,16 +385,10 @@ async function consultarSaldoEnNube() {
     if (Array.isArray(lista) && lista.length > 0) {
       const datos = lista[0];
 
-      const editandoFormulario = ["regNombre", "regRut", "regInstitucion", "regCorreo", "regUid"].includes(
-        document.activeElement?.id
-      );
-
-      if (!editandoFormulario) {
-        if (datos.nombre && datos.nombre !== "Estudiante TNE") state.nombre = datos.nombre;
-        if (datos.rut) state.rut = datos.rut;
-        if (datos.institucion) state.institucion = datos.institucion;
-        if (datos.correo) state.correo = datos.correo;
-      }
+      if (datos.nombre && datos.nombre !== "Estudiante TNE") state.nombre = datos.nombre;
+      if (datos.rut) state.rut = datos.rut;
+      if (datos.institucion) state.institucion = datos.institucion;
+      if (datos.correo) state.correo = datos.correo;
 
       if (datos.estado === "Bloqueado" || datos.estado === "Extraviada") {
         state.tarjetaCongelada = true;
@@ -780,7 +762,7 @@ function configurarEventos() {
     document.getElementById("nfcGuideModalBackdrop")?.classList.remove("open");
   });
 
-  // 1. Botón "Cambiar TNE" (en pestaña Pagar): abre el menú ilustrado con título "Cambiar TNE"
+  // 1. Botón "Cambiar TNE" (en pestaña Pagar)
   document.getElementById("scanNfcWalletBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Cambiar TNE", (uidLeido) => {
       const validadorAsociado = CONFIG.stickersValidadores?.[uidLeido];
@@ -799,7 +781,7 @@ function configurarEventos() {
     });
   });
 
-  // 2. Botón "Vincular TNE" (en pestaña Cuenta): abre el mismo menú ilustrado con título "Vincular TNE"
+  // 2. Botón "Vincular TNE" (en pestaña Cuenta)
   document.getElementById("scanNfcRegBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Vincular TNE", (uidHex) => {
       const regUidInput = document.getElementById("regUid");
@@ -850,11 +832,13 @@ function configurarEventos() {
     anunciarCelularEnValidadorEspecifico(false);
     state.sesionActiva = false;
     guardarPerfilLocal();
+    limpiarRecuadrosRegistro();
     verificarSesionInicial();
   });
 
   document.getElementById("goToRegisterFromLogin")?.addEventListener("click", () => {
     document.getElementById("loginModalBackdrop")?.classList.remove("open");
+    limpiarRecuadrosRegistro();
     mostrarPestana("cuenta");
   });
 
@@ -877,7 +861,7 @@ function configurarEventos() {
         state.correo = correo;
         guardarPerfilLocal();
         document.getElementById("loginModalBackdrop")?.classList.remove("open");
-        rellenarFormularioCuenta();
+        limpiarRecuadrosRegistro();
         actualizarUI();
         await consultarSaldoEnNube();
         mostrarPestana("saldo");
@@ -928,6 +912,7 @@ function configurarEventos() {
 
       state.sesionActiva = true;
       guardarPerfilLocal();
+      limpiarRecuadrosRegistro();
       actualizarUI();
       await consultarSaldoEnNube();
       mostrarToast("✔ Datos guardados correctamente", "ok");
