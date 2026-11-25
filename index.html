@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0F2537" />
+  <meta name="description" content="Mi Pase TNE Valparaíso - Billetera estudiantil digital" />
+  <title>Mi Pase TNE · Valparaíso</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Encabezado superior limpio -->
+    <header class="app-header">
+      <h1 class="header-brand">Mi Pase TNE</h1>
+      <div class="header-actions">
+        <div class="cloud-pill" id="syncPill" title="Estado de tu Pase Escolar">
+          <span class="status-dot" id="syncDot"></span>
+          <span id="syncText">Pase Activo</span>
+        </div>
+        <button type="button" class="theme-btn" id="themeToggleBtn" aria-label="Cambiar modo oscuro o claro" title="Modo Oscuro / Claro">
+          🌙
+        </button>
+        <button type="button" class="theme-btn logout-btn" id="logoutBtn" aria-label="Cerrar Sesión" title="Cerrar Sesión">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- Notificación flotante unificada -->
+      <div id="toastBanner" class="toast-banner" role="status" aria-live="polite">
+        <span id="toastText"></span>
+      </div>
+
+      <!-- Banner de Préstamo Escolar de Emergencia (aparece automático si saldo < $200) -->
+      <div id="emergencyBanner" class="emergency-banner" role="alert">
+        <div class="emergency-info">
+          <strong>🆘 Te quedaste sin saldo para viajar</strong>
+          <span>Activa 1 Pasaje Escolar de Emergencia (-$200). Se descuenta en tu próxima recarga.</span>
+        </div>
+        <button type="button" class="btn-emergency" id="bannerEmergencyBtn">
+          Pedir Fiado -$200
+        </button>
+      </div>
+
+      <!-- 1. VISTA SALDO -->
+      <section class="view-panel active" id="view-saldo">
+        <article class="card">
+          <div class="tne-strip">
+            <span>JUNAEB · Tarjeta Nacional Estudiantil</span>
+            <span class="seal-badge" id="sealBadge">SELLO 2026</span>
+          </div>
+
+          <div class="student-row">
+            <div>
+              <h2 class="student-name" id="studentNameLabel">Estudiante TNE</h2>
+              <p class="student-meta" id="studentMetaLabel">Educación Superior · Sin RUT</p>
+            </div>
+            <span class="uid-pill" id="cardStatusBadge">ACTIVA</span>
+          </div>
+
+          <div class="balance-row">
+            <div>
+              <span class="balance-label">Saldo Disponible</span>
+              <button type="button" class="btn-ghost" id="toggleEyeBtn" aria-label="Ocultar o mostrar saldo">
+                <span id="eyeLabel">👁️ Ocultar</span>
+              </button>
+            </div>
+            <span class="balance-value" id="balanceDisplay">$0</span>
+          </div>
+
+          <div class="fare-footer" id="fareFooterBox">
+            <span>Tarifa Escolar: <strong id="fareAmountLabel">$200 CLP</strong></span>
+            <span id="tripsLeftLabel">Viajes: 0</span>
+          </div>
+        </article>
+
+        <!-- Últimos 2 movimientos rápidos -->
+        <section class="card">
+          <div class="card-header-inline">
+            <h3 class="section-subtitle">Últimos Movimientos</h3>
+            <button type="button" class="btn-ghost" data-goto="historial">Ver todo</button>
+          </div>
+          <ul class="history-list" id="homeMiniHistory"></ul>
+        </section>
+      </section>
+
+      <!-- 2. VISTA PAGO -->
+      <section class="view-panel" id="view-pago">
+        <div class="validator-stage" id="validatorStage" aria-live="polite">
+          <div class="stage-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/>
+            </svg>
+          </div>
+          <h2 class="stage-title" id="stageTitle">Acerca tu TNE al Validador</h2>
+          <p class="stage-subtitle" id="stageSubtitle">
+            📲 Listo para viajar: acerca tu TNE o celular al validador de la micro.
+          </p>
+        </div>
+
+        <div class="card action-stack">
+          <div class="fare-footer">
+            <span>Sector GPS:</span>
+            <select id="zoneSelect" class="zone-select" aria-label="Sector GPS en Valparaíso"></select>
+          </div>
+
+          <button type="button" class="btn-primary btn-pay-huge" id="payWebBtn">
+            <span id="payBtnText">Pagar Pasaje Escolar (-$200)</span>
+          </button>
+
+          <button type="button" class="btn-loan-action" id="payViewLoanBtn" style="display: none;">
+            🆘 Usar Préstamo Escolar de Emergencia (-$200)
+          </button>
+
+          <button type="button" class="btn-secondary" id="scanNfcWalletBtn">
+            Cambiar TNE
+          </button>
+        </div>
+      </section>
+
+      <!-- 3. VISTA RECARGA -->
+      <section class="view-panel" id="view-recarga">
+        <div class="card">
+          <h2 class="section-subtitle">Recargar Saldo en la Cuenta</h2>
+          <p class="helper-text">
+            Selecciona o ingresa el monto a abonar en tu Pase Estudiantil:
+          </p>
+          <div class="recharge-grid" id="rechargeButtonsContainer"></div>
+          <div class="custom-recharge-row">
+            <input type="number" id="customMontoInput" class="form-input" placeholder="Otro monto CLP (ej. 3000)" min="200" step="100" />
+            <button type="button" class="btn-primary btn-auto" id="customRechargeBtn">Cargar</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. VISTA HISTORIAL -->
+      <section class="view-panel" id="view-historial">
+        <div class="card savings-card">
+          <div>
+            <span class="balance-label">Ahorro Estudiantil (Ley 20.378)</span>
+            <strong class="savings-amount" id="statSavingsValue">$0</strong>
+          </div>
+          <span class="uid-pill" id="statTripsCount">0 viajes</span>
+        </div>
+
+        <div class="card">
+          <div class="card-header-inline">
+            <h2 class="section-subtitle">Registro de Movimientos</h2>
+            <button type="button" class="btn-ghost" id="clearHistoryBtn">Limpiar</button>
+          </div>
+          <ul class="history-list" id="historyList"></ul>
+        </div>
+      </section>
+
+      <!-- 5. VISTA CUENTA (Recuadros vacíos, solo con texto de ejemplo en gris) -->
+      <section class="view-panel" id="view-cuenta">
+        <details class="accordion-card" open>
+          <summary>👤 Datos del Estudiante</summary>
+          <form id="registerForm" autocomplete="off">
+            <div class="form-group">
+              <label class="form-label" for="regNombre">Nombre Completo</label>
+              <input type="text" id="regNombre" class="form-input" placeholder="Ej: Matías Pino" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regRut">RUT Chileno</label>
+              <input type="text" id="regRut" class="form-input" placeholder="Ej: 21.345.678-9" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regInstitucion">Institución</label>
+              <input type="text" id="regInstitucion" class="form-input" placeholder="Ej: Universidad de Valparaíso" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regCorreo">Correo Institucional</label>
+              <input type="email" id="regCorreo" class="form-input" placeholder="Ej: estudiante@alumnos.uv.cl" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regPassword">Contraseña</label>
+              <input type="password" id="regPassword" class="form-input" placeholder="Mínimo 4 caracteres" />
+            </div>
+            <input type="hidden" id="regUid" />
+            <div class="form-group">
+              <button type="button" class="btn-secondary" id="scanNfcRegBtn">
+                Vincular TNE
+              </button>
+            </div>
+            <button type="submit" class="btn-primary" style="margin-top:6px;">Guardar mis Datos</button>
+          </form>
+        </details>
+      </section>
+    </main>
+
+    <!-- Barra de navegación inferior -->
+    <nav class="bottom-nav" aria-label="Navegación principal">
+      <button type="button" class="tab-btn active" data-tab="saldo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <span>Saldo</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="pago">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a6 6 0 0 1 6-6"/><rect x="6" y="8" width="16" height="12" rx="2"/></svg>
+        <span>Pagar</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="recarga">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <span>Recarga</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="historial">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>Historial</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="cuenta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Cuenta</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- MODAL GUÍA VISUAL ILUSTRADA DE 2 PASOS (TARJETA TNE DETRÁS DEL CELULAR) -->
+  <div class="modal-backdrop" id="nfcGuideModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="nfcGuideTitle">
+    <div class="modal-card nfc-guide-card">
+      <div class="nfc-guide-header">
+        <span class="nfc-guide-badge">LECTURA SIN CONTACTO NFC</span>
+        <h2 id="nfcGuideTitle" class="modal-title">Vincular TNE</h2>
+      </div>
+
+      <!-- PASO 1 -->
+      <div class="nfc-step-row">
+        <div class="nfc-illustration-box">
+          <div class="illus-backdrop"></div>
+          <div class="illus-phone">
+            <div class="illus-notch"></div>
+            <div class="illus-screen">
+              <div class="illus-app-bar"></div>
+              <div class="illus-app-line"></div>
+            </div>
+          </div>
+          <div class="illus-tne-card step1-card">
+            <span class="illus-tne-tag">TNE</span>
+            <div class="illus-tne-chip"></div>
+          </div>
+        </div>
+        <div class="nfc-step-text">
+          <span class="step-big-num">1</span>
+          <p>Activa el <strong>NFC</strong> de tu teléfono y ten tu <strong>TNE física</strong> a mano.</p>
+        </div>
+      </div>
+
+      <!-- PASO 2 -->
+      <div class="nfc-step-row reverse">
+        <div class="nfc-step-text">
+          <span class="step-big-num">2</span>
+          <p><strong>Ponga su TNE detrás del celular</strong> y manténgala firme unos segundos.</p>
+        </div>
+        <div class="nfc-illustration-box">
+          <div class="illus-backdrop"></div>
+          <div class="illus-nfc-waves"></div>
+          <div class="illus-tne-card step2-card-behind">
+            <span class="illus-tne-tag">TNE</span>
+            <div class="illus-tne-chip"></div>
+          </div>
+          <div class="illus-phone front-phone">
+            <div class="illus-notch"></div>
+            <div class="illus-screen scanning">
+              <div class="illus-scan-check">📡</div>
+              <div class="illus-scan-bar">Detectando TNE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nfc-live-status" id="nfcLiveStatusBox">
+        <span class="nfc-pulse-dot"></span>
+        <span id="nfcLiveStatusText">Ponga su TNE detrás del celular...</span>
+      </div>
+
+      <button type="button" class="btn-secondary" id="closeNfcGuideBtn">
+        Cancelar
+      </button>
+    </div>
+  </div>
+
+  <!-- PANTALLA COMPLETA ANIMADA DE PAGO APROBADO (VERDE) O RECHAZADO (ROJA) -->
+  <div id="paymentFullOverlay" class="payment-full-overlay" role="alertdialog" aria-live="assertive" aria-hidden="true">
+    <div class="overlay-badge" id="overlayTopBadge">• PASAJE ESCOLAR TNE</div>
+    <div class="overlay-icon-circle" id="overlayIconBox"></div>
+    <h2 class="overlay-title" id="overlayTitle">¡Pasaje Aprobado!</h2>
+    <p class="overlay-subtitle" id="overlaySubtitle">Tarifa Estudiante (-$200)</p>
+
+    <div class="overlay-details-card">
+      <div class="overlay-detail-row">
+        <span>Estudiante</span>
+        <strong id="overlayStudentName">---</strong>
+      </div>
+      <div class="overlay-detail-row">
+        <span>Sector</span>
+        <strong id="overlayZoneName">Plan de Valparaíso</strong>
+      </div>
+      <div class="overlay-detail-row">
+        <span>Saldo Restante</span>
+        <strong id="overlayBalance">$0</strong>
+      </div>
+    </div>
+
+    <div class="overlay-countdown-pill">
+      Volviendo en <span id="overlayCountdownNum">3</span>s...
+    </div>
+    <div class="overlay-progress-track">
+      <div class="overlay-progress-fill" id="overlayProgressBar"></div>
+    </div>
+  </div>
+
+  <!-- Modal Inicio de Sesión -->
+  <div class="modal-backdrop" id="loginModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <div class="modal-card">
+      <h2 id="loginTitle" class="modal-title">Iniciar Sesión TNE</h2>
+      <p class="modal-desc">
+        Ingresa con tu correo para acceder a tu Pase Estudiantil.
+      </p>
+      <form id="loginForm" autocomplete="off">
+        <div class="form-group">
+          <label class="form-label" for="loginCorreo">Correo Electrónico</label>
+          <input type="email" id="loginCorreo" class="form-input" required placeholder="Ej: estudiante@alumnos.uv.cl" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginPassword">Contraseña</label>
+          <input type="password" id="loginPassword" class="form-input" required placeholder="••••••••" />
+        </div>
+        <button type="submit" class="btn-primary" style="margin-top:6px;">Ingresar</button>
+      </form>
+      <div style="text-align:center; margin-top:12px;">
+        <button type="button" class="btn-ghost" id="goToRegisterFromLogin">Crear nueva cuenta TNE</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

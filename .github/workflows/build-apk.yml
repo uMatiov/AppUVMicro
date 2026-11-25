@@ -1,0 +1,43 @@
+name: Compilar APK Mi Pase TNE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Preparar carpeta www y sincronizar Capacitor
+        run: |
+          mkdir -p www
+          cp index.html styles.css app.js config.json manifest.json www/ 2>/dev/null || true
+          npm install
+          npx cap copy android
+
+      - name: Compilar APK de Android
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Publicar APK descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mi-Pase-TNE-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
