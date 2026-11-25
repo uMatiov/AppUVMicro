@@ -28,13 +28,13 @@ jobs:
           mkdir -p www
           cp index.html styles.css app.js config.json manifest.json www/ 2>/dev/null || true
           npm install
-          npx cap copy android
+          npx cap sync android
 
       - name: Compilar APK de Android
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
