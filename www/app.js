@@ -28,20 +28,27 @@ const DEFAULT_CONFIG = {
   }
 };
 
+// Limpieza única al actualizar desde la APK anterior que guardaba FCDC1198 por defecto
+if (localStorage.getItem("tne_app_schema") !== "v2_clean_auth") {
+  localStorage.clear();
+  localStorage.setItem("tne_app_schema", "v2_clean_auth");
+}
+
 let CONFIG = DEFAULT_CONFIG;
 let headersSupabase = {};
 let procesandoTransaccion = false;
 let timerModoCelular = null;
 
+// Arranca 100% vacío si no hay cuenta iniciada
 let state = {
   sesionActiva: localStorage.getItem("tne_sesion_activa") === "true",
-  uid: localStorage.getItem("tne_uid_activo") || "FCDC1198",
-  nombre: localStorage.getItem("tne_nombre") || "Estudiante TNE",
+  uid: localStorage.getItem("tne_uid_activo") || "",
+  nombre: localStorage.getItem("tne_nombre") || "",
   rut: localStorage.getItem("tne_rut") || "",
   correo: localStorage.getItem("tne_correo") || "",
   institucion: localStorage.getItem("tne_institucion") || "Educación Superior",
   saldo: null,
-  estado: "Activo",
+  estado: "Inactivo",
   ocultarSaldo: localStorage.getItem("tne_ocultar_saldo") === "true",
   modoOscuro: localStorage.getItem("tne_dark_mode") === "true",
   prestamoEmergencia: localStorage.getItem("tne_prestamo_activo") === "true",
@@ -50,6 +57,14 @@ let state = {
   bloqueoCobro: false,
   historial: JSON.parse(localStorage.getItem("tne_historial_web") || "[]")
 };
+
+function cambiarModoLectorNativo(activar) {
+  try {
+    if (window.AndroidNfc && typeof window.AndroidNfc.setModoLecturaTne === "function") {
+      window.AndroidNfc.setModoLecturaTne(Boolean(activar));
+    }
+  } catch {}
+}
 
 function limpiarTextosTecnicosHistorial() {
   let modificado = false;
@@ -69,7 +84,6 @@ function limpiarTextosTecnicosHistorial() {
   }
 }
 
-// Limpia todos los recuadros del formulario de registro para que solo se vea el placeholder de ejemplo
 function limpiarRecuadrosRegistro() {
   ["regNombre", "regRut", "regInstitucion", "regCorreo", "regPassword", "regUid"].forEach((id) => {
     const input = document.getElementById(id);
@@ -77,7 +91,6 @@ function limpiarRecuadrosRegistro() {
   });
 }
 
-// 1. Inicialización y carga de config.json
 async function inicializarApp() {
   try {
     const res = await fetch("./config.json", { cache: "no-store" });
@@ -85,9 +98,7 @@ async function inicializarApp() {
       const jsonExterno = await res.json();
       CONFIG = { ...DEFAULT_CONFIG, ...jsonExterno };
     }
-  } catch {
-    // shortcut: Respaldo local automático si falla la carga de config.json
-  }
+  } catch {}
 
   headersSupabase = {
     apikey: CONFIG.supabase.anonKey,
@@ -100,10 +111,24 @@ async function inicializarApp() {
   aplicarModoOscuro();
   poblarControlesDesdeConfig();
   configurarEventos();
-  verificarSesionInicial();
-  actualizarUI();
-  renderizarHistorial();
-  await consultarSaldoEnNube();
+  cambiarModoLectorNativo(false);
+
+  // Primera vez sin cuenta: inicia directo en la pestaña "Cuenta" sin datos ajenos
+  if (!state.sesionActiva || !state.uid) {
+    state.sesionActiva = false;
+    state.uid = "";
+    state.saldo = 0;
+    document.getElementById("loginModalBackdrop")?.classList.remove("open");
+    mostrarPestana("cuenta", true);
+    actualizarUI();
+    renderizarHistorial();
+  } else {
+    mostrarPestana("saldo", true);
+    actualizarUI();
+    renderizarHistorial();
+    await consultarSaldoEnNube();
+  }
+
   setInterval(consultarSaldoEnNube, CONFIG.app.intervaloPollingMs);
 }
 
@@ -135,7 +160,6 @@ function poblarControlesDesdeConfig() {
   }
 }
 
-// 2. Utilidades de formato, vibración y persistencia
 function formatearPesos(valor) {
   const n = Number(valor) || 0;
   return n < 0 ? `-$${Math.abs(n).toLocaleString("es-CL")}` : `$${n.toLocaleString("es-CL")}`;
@@ -143,10 +167,11 @@ function formatearPesos(valor) {
 
 function sanitizarUid(raw) {
   const limpio = String(raw || "").toUpperCase().replace(/[^0-9A-F]/g, "");
-  return limpio.length >= 4 ? limpio.slice(0, 16) : state.uid;
+  return limpio.length >= 4 ? limpio.slice(0, 16) : "";
 }
 
 function guardarPerfilLocal() {
+  localStorage.setItem("tne_app_schema", "v2_clean_auth");
   localStorage.setItem("tne_sesion_activa", String(state.sesionActiva));
   localStorage.setItem("tne_uid_activo", state.uid);
   localStorage.setItem("tne_nombre", state.nombre);
@@ -206,9 +231,8 @@ function reproducirFeedbackSensorial(aprobado) {
   } catch {}
 }
 
-// 3. Emparejamiento silencioso en segundo plano
 async function anunciarCelularEnValidadorEspecifico(activo) {
-  if (!state.uid) return;
+  if (!state.uid || !state.sesionActiva) return;
   clearTimeout(timerModoCelular);
 
   const estadoParaServidor = activo ? `PAGANDO_${state.validadorId}` : "Activo";
@@ -222,14 +246,18 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
     if (activo) {
       const stageSub = document.getElementById("stageSubtitle");
       if (stageSub) {
-        stageSub.textContent = "📲 Listo para viajar: acerca tu TNE o celular al validador de la micro.";
+        const nfcOk = !window.AndroidNfc || window.AndroidNfc.tieneNfcActivo();
+        stageSub.textContent = nfcOk
+          ? "📲 Antena NFC lista: acerca la espalda de tu celular al lector azul del validador."
+          : "⚠️ Enciende el NFC en los ajustes de tu teléfono para pagar acercándolo.";
       }
-      timerModoCelular = setTimeout(() => anunciarCelularEnValidadorEspecifico(false), 30000);
+      timerModoCelular = setTimeout(() => anunciarCelularEnValidadorEspecifico(false), 60000);
     }
   } catch {}
 }
 
 async function notificarCobroExitosoAlValidador(nuevoSaldo) {
+  if (!state.uid) return;
   try {
     await fetch(`${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}`, {
       method: "PATCH",
@@ -242,16 +270,16 @@ async function notificarCobroExitosoAlValidador(nuevoSaldo) {
   } catch {}
 }
 
-// 4. Navegación y actualización de interfaz
-function mostrarPestana(tabId) {
+function mostrarPestana(tabId, silencioso = false) {
   if (!state.sesionActiva && tabId !== "cuenta") {
-    document.getElementById("loginModalBackdrop")?.classList.add("open");
-    return;
+    if (!silencioso) mostrarToast("Crea tu cuenta o inicia sesión primero.", "warn");
+    tabId = "cuenta";
   }
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".view-panel").forEach((p) => p.classList.toggle("active", p.id === `view-${tabId}`));
 
-  if (tabId === "pago") {
+  if (tabId === "pago" && state.sesionActiva) {
+    cambiarModoLectorNativo(false); // Emulación HCE activa para el lector RFID-RC522
     anunciarCelularEnValidadorEspecifico(true);
   } else {
     anunciarCelularEnValidadorEspecifico(false);
@@ -262,10 +290,18 @@ function actualizarUI() {
   const nameEl = document.getElementById("studentNameLabel");
   const metaEl = document.getElementById("studentMetaLabel");
   const statusBadgeEl = document.getElementById("cardStatusBadge");
+  const syncText = document.getElementById("syncText");
 
-  if (nameEl) nameEl.textContent = state.nombre || "Titular TNE";
-  if (metaEl) metaEl.textContent = `${state.institucion} · ${state.rut ? `RUT ${state.rut}` : "Estudiante"}`;
-  if (statusBadgeEl) statusBadgeEl.textContent = "ACTIVA";
+  if (!state.sesionActiva || !state.uid) {
+    if (nameEl) nameEl.textContent = "Sin Cuenta Activa";
+    if (metaEl) metaEl.textContent = "Crea tu cuenta y vincula tu TNE";
+    if (statusBadgeEl) statusBadgeEl.textContent = "SIN VINCULAR";
+    if (syncText) syncText.textContent = "Sin cuenta";
+  } else {
+    if (nameEl) nameEl.textContent = state.nombre || "Estudiante TNE";
+    if (metaEl) metaEl.textContent = `${state.institucion} · ${state.rut ? `RUT ${state.rut}` : "Vinculado"}`;
+    if (statusBadgeEl) statusBadgeEl.textContent = "ACTIVA";
+  }
 
   const saldoBase = state.saldo !== null ? Number(state.saldo) : 0;
   const saldoMostrado = state.prestamoEmergencia && saldoBase === 0 ? -CONFIG.tarifas.escolar : saldoBase;
@@ -292,10 +328,11 @@ function actualizarUI() {
   }
 
   if (fareFooterBox) {
-    fareFooterBox.classList.toggle("critical-balance", !state.ocultarSaldo && viajes <= 1);
+    fareFooterBox.classList.toggle("critical-balance", state.sesionActiva && !state.ocultarSaldo && viajes <= 1);
   }
 
   const necesitaPrestamo =
+    state.sesionActiva &&
     state.saldo !== null &&
     Number(state.saldo) < CONFIG.tarifas.escolar &&
     !state.prestamoEmergencia;
@@ -362,9 +399,8 @@ function renderizarHistorial() {
   homeMini.innerHTML = renderFilas(state.historial.slice(0, 2));
 }
 
-// 5. Sincronización silenciosa en tiempo real
 async function consultarSaldoEnNube() {
-  if (!state.uid || procesandoTransaccion) return;
+  if (!state.sesionActiva || !state.uid || procesandoTransaccion) return;
   const syncDot = document.getElementById("syncDot");
   const syncText = document.getElementById("syncText");
 
@@ -379,7 +415,9 @@ async function consultarSaldoEnNube() {
     if (Array.isArray(lista) && lista.length > 0) {
       const datos = lista[0];
 
-      if (datos.nombre && datos.nombre !== "Estudiante TNE") state.nombre = datos.nombre;
+      if (datos.nombre && datos.nombre !== "Estudiante TNE" && datos.nombre !== "SIN ASIGNAR") {
+        state.nombre = datos.nombre;
+      }
       if (datos.rut) state.rut = datos.rut;
       if (datos.institucion) state.institucion = datos.institucion;
       if (datos.correo) state.correo = datos.correo;
@@ -424,7 +462,6 @@ async function consultarSaldoEnNube() {
   }
 }
 
-// 6. Pantalla Completa Verde/Roja con Check/Cruz Animado y Cooldown de 3 segundos
 let overlayTimer = null;
 let overlayCountdownInterval = null;
 
@@ -521,8 +558,12 @@ function iniciarCooldownAntiDobleCobro() {
   }, 1000);
 }
 
-// 7. Cobro, Préstamo Escolar y Recarga
 async function pagarPasajeWeb(origenCobro = "Pago Móvil Micro") {
+  if (!state.sesionActiva || !state.uid) {
+    mostrarToast("Primero registra tu cuenta y vincula tu TNE.", "warn");
+    mostrarPestana("cuenta", true);
+    return;
+  }
   if (state.bloqueoCobro) {
     mostrarToast("⏳ Espera 3 segundos antes de volver a validar.", "warn");
     return;
@@ -614,6 +655,11 @@ async function activarPrestamoEmergencia() {
 }
 
 async function recargarSaldoWeb(monto) {
+  if (!state.sesionActiva || !state.uid) {
+    mostrarToast("Vincula tu TNE antes de recargar.", "warn");
+    mostrarPestana("cuenta", true);
+    return;
+  }
   const valor = parseInt(monto, 10);
   if (!Number.isFinite(valor) || valor <= 0) return;
 
@@ -659,7 +705,6 @@ async function recargarSaldoWeb(monto) {
   }
 }
 
-// 8. Menú Guía Visual de 2 Pasos ("Ponga su TNE detrás del celular") y Lectura NFC
 function abrirMenuGuiaNfc(tituloModal, callbackUid) {
   const modal = document.getElementById("nfcGuideModalBackdrop");
   const titleEl = document.getElementById("nfcGuideTitle");
@@ -667,40 +712,41 @@ function abrirMenuGuiaNfc(tituloModal, callbackUid) {
 
   window.callbackNfcGuiaActivo = callbackUid;
   if (titleEl) titleEl.textContent = tituloModal;
-  if (statusEl) statusEl.textContent = "Ponga su TNE detrás del celular...";
   if (modal) modal.classList.add("open");
 
-  if (!("NDEFReader" in window)) {
+  // Activa ReaderMode nativo de Android (lee TNE física Mifare Classic al instante)
+  cambiarModoLectorNativo(true);
+
+  if (window.AndroidNfc) {
+    const activo = window.AndroidNfc.tieneNfcActivo();
     if (statusEl) {
-      statusEl.textContent = "Acerca tu TNE física al reverso del teléfono...";
+      statusEl.textContent = activo
+        ? "📡 Lector activo: apoya tu TNE física detrás del teléfono..."
+        : "⚠️ Activa el NFC en los ajustes de tu teléfono y apoya tu TNE.";
     }
     return;
   }
 
-  const ndef = new NDEFReader();
-  ndef
-    .scan()
-    .then(() => {
-      if (statusEl) statusEl.textContent = "📡 Lector activo: ponga su TNE detrás del celular...";
-      ndef.onreading = (event) => {
-        if (event.serialNumber) {
-          reproducirFeedbackSensorial(true);
-          modal?.classList.remove("open");
-          callbackUid(sanitizarUid(event.serialNumber));
-        }
-      };
-    })
-    .catch(() => {
-      if (statusEl) statusEl.textContent = "⚠️ Activa el NFC en los ajustes de tu teléfono.";
-    });
+  if (statusEl) statusEl.textContent = "📡 Apoya tu TNE física detrás del teléfono...";
+  if ("NDEFReader" in window) {
+    try {
+      const ndef = new NDEFReader();
+      ndef.scan().then(() => {
+        ndef.onreading = (event) => {
+          if (event.serialNumber) window.onNativeNfcScanned(event.serialNumber);
+        };
+      }).catch(() => {});
+    } catch {}
+  }
 }
 
-function verificarSesionInicial() {
-  const modal = document.getElementById("loginModalBackdrop");
-  if (modal) modal.classList.toggle("open", !state.sesionActiva || !state.uid);
+function cerrarMenuGuiaNfc() {
+  window.callbackNfcGuiaActivo = null;
+  document.getElementById("nfcGuideModalBackdrop")?.classList.remove("open");
+  // Apaga ReaderMode para reactivar HCE (pago sin contacto en RC522)
+  cambiarModoLectorNativo(false);
 }
 
-// 9. Eventos de la Interfaz
 function configurarEventos() {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => mostrarPestana(btn.dataset.tab));
@@ -739,11 +785,9 @@ function configurarEventos() {
     clearInterval(overlayCountdownInterval);
   });
 
-  document.getElementById("closeNfcGuideBtn")?.addEventListener("click", () => {
-    document.getElementById("nfcGuideModalBackdrop")?.classList.remove("open");
-  });
+  document.getElementById("closeNfcGuideBtn")?.addEventListener("click", cerrarMenuGuiaNfc);
 
-  // 1. Botón "Cambiar TNE" (en pestaña Pagar)
+  // Botón "Cambiar TNE" (pestaña Pagar)
   document.getElementById("scanNfcWalletBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Cambiar TNE", (uidLeido) => {
       const validadorAsociado = CONFIG.stickersValidadores?.[uidLeido];
@@ -757,18 +801,18 @@ function configurarEventos() {
         guardarPerfilLocal();
         actualizarUI();
         consultarSaldoEnNube();
-        mostrarToast("✔ Tarjeta TNE cambiada con éxito", "ok");
+        mostrarToast(`✔ Tarjeta TNE (${uidLeido}) cambiada con éxito`, "ok");
       }
     });
   });
 
-  // 2. Botón "Vincular TNE" (en pestaña Cuenta)
+  // Botón "Vincular TNE" (pestaña Cuenta)
   document.getElementById("scanNfcRegBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Vincular TNE", (uidHex) => {
       const regUidInput = document.getElementById("regUid");
       if (regUidInput) regUidInput.value = uidHex;
       state.uid = uidHex;
-      mostrarToast("✔ Tarjeta TNE vinculada correctamente", "ok");
+      mostrarToast(`✔ TNE ${uidHex} leída correctamente`, "ok");
     });
   });
 
@@ -791,18 +835,34 @@ function configurarEventos() {
     renderizarHistorial();
   });
 
+  // Cerrar sesión deja la app 100% limpia en Cuenta
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     anunciarCelularEnValidadorEspecifico(false);
+    cambiarModoLectorNativo(false);
+    localStorage.clear();
+    localStorage.setItem("tne_app_schema", "v2_clean_auth");
     state.sesionActiva = false;
-    guardarPerfilLocal();
+    state.uid = "";
+    state.nombre = "";
+    state.rut = "";
+    state.correo = "";
+    state.saldo = 0;
+    state.historial = [];
     limpiarRecuadrosRegistro();
-    verificarSesionInicial();
+    actualizarUI();
+    renderizarHistorial();
+    mostrarPestana("cuenta", true);
+    mostrarToast("Sesión cerrada. Registra una nueva cuenta o inicia sesión.", "ok");
+  });
+
+  document.getElementById("openLoginModalBtn")?.addEventListener("click", () => {
+    document.getElementById("loginModalBackdrop")?.classList.add("open");
   });
 
   document.getElementById("goToRegisterFromLogin")?.addEventListener("click", () => {
     document.getElementById("loginModalBackdrop")?.classList.remove("open");
     limpiarRecuadrosRegistro();
-    mostrarPestana("cuenta");
+    mostrarPestana("cuenta", true);
   });
 
   document.getElementById("loginForm")?.addEventListener("submit", async (e) => {
@@ -822,12 +882,13 @@ function configurarEventos() {
         if (data.nombre) state.nombre = data.nombre;
         if (data.rut) state.rut = data.rut;
         state.correo = correo;
+        state.saldo = null;
         guardarPerfilLocal();
         document.getElementById("loginModalBackdrop")?.classList.remove("open");
         limpiarRecuadrosRegistro();
         actualizarUI();
         await consultarSaldoEnNube();
-        mostrarPestana("saldo");
+        mostrarPestana("saldo", true);
       } else {
         mostrarToast(data?.mensaje || "Correo o contraseña incorrectos", "err");
       }
@@ -838,12 +899,17 @@ function configurarEventos() {
 
   document.getElementById("registerForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const uidIngresado = sanitizarUid(document.getElementById("regUid")?.value || state.uid);
+    if (!uidIngresado) {
+      mostrarToast("⚠️ Primero presiona 'Vincular TNE' y acerca tu tarjeta detrás del celular.", "err");
+      return;
+    }
+
+    state.uid = uidIngresado;
     state.nombre = document.getElementById("regNombre").value.trim().toUpperCase();
     state.rut = document.getElementById("regRut").value.trim();
     state.institucion = document.getElementById("regInstitucion").value.trim();
     state.correo = document.getElementById("regCorreo").value.trim();
-    const uidInputVal = document.getElementById("regUid")?.value;
-    if (uidInputVal) state.uid = sanitizarUid(uidInputVal);
     const pass = document.getElementById("regPassword").value.trim() || "1234";
 
     try {
@@ -856,7 +922,7 @@ function configurarEventos() {
           p_rut: state.rut,
           p_institucion: state.institucion,
           p_correo: state.correo,
-          p_saldo_inicial: state.saldo !== null ? state.saldo : 1000,
+          p_saldo_inicial: 0,
           p_password: pass
         })
       });
@@ -874,43 +940,43 @@ function configurarEventos() {
       });
 
       state.sesionActiva = true;
+      state.saldo = null;
       guardarPerfilLocal();
       limpiarRecuadrosRegistro();
       actualizarUI();
       await consultarSaldoEnNube();
-      mostrarToast("✔ Datos guardados correctamente", "ok");
-      mostrarPestana("saldo");
+      mostrarToast(`✔ Cuenta creada y TNE ${state.uid} vinculada`, "ok");
+      mostrarPestana("saldo", true);
     } catch {
-      mostrarToast("Datos guardados en el dispositivo", "warn");
+      mostrarToast("Error al guardar cuenta en la nube", "err");
     }
   });
 }
 
 document.addEventListener("DOMContentLoaded", inicializarApp);
 
-// Puente nativo para la APK Android (sin ventana blanca de etiqueta vacía)
+// Puente nativo llamado desde MainActivity.java al leer una TNE física o sticker NFC
 window.onNativeNfcScanned = function(uidLeido) {
   const uidLimpio = sanitizarUid(uidLeido);
   if (!uidLimpio) return;
 
-  // Si está abierto el menú de "Vincular / Cambiar TNE", guarda esa tarjeta
+  reproducirFeedbackSensorial(true);
+
   const modalNfc = document.getElementById("nfcGuideModalBackdrop");
   if (modalNfc && modalNfc.classList.contains("open")) {
-    reproducirFeedbackSensorial(true);
-    modalNfc.classList.remove("open");
-    if (typeof window.callbackNfcGuiaActivo === "function") {
-      window.callbackNfcGuiaActivo(uidLimpio);
+    const cb = window.callbackNfcGuiaActivo;
+    cerrarMenuGuiaNfc();
+    if (typeof cb === "function") {
+      cb(uidLimpio);
     } else {
+      const regUidInput = document.getElementById("regUid");
+      if (regUidInput) regUidInput.value = uidLimpio;
       state.uid = uidLimpio;
-      state.saldo = null;
-      guardarPerfilLocal();
-      actualizarUI();
-      consultarSaldoEnNube();
-      mostrarToast("✔ TNE vinculada por NFC nativo", "ok");
+      mostrarToast(`✔ TNE ${uidLimpio} vinculada`, "ok");
     }
     return;
   }
 
-  // En modo normal: cobra el pasaje de $200 directamente en Supabase y activa el validador
+  // Si toca un sticker/tag NFC del validador estando en la pestaña Pagar
   pagarPasajeWeb("Pago NFC en Validador (-$200)");
 };
