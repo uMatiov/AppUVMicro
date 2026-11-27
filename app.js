@@ -47,8 +47,8 @@ let nfcAbortController = null;
 let cooldownIntervalId = null;
 let cooldownSegsRestantes = 0;
 let syncEpoch = 0;
-let pestanaActual = "cuenta";
 
+// shortcut: prestamoEmergencia e historial persisten en localStorage hasta migrar deuda/historial a Supabase con RLS.
 let state = {
   sesionActiva: localStorage.getItem("tne_sesion_activa") === "true",
   uid: localStorage.getItem("tne_uid_activo") || "",
@@ -197,7 +197,9 @@ async function inicializarApp() {
         zonasMapa: jsonExterno.zonasMapa || DEFAULT_CONFIG.zonasMapa
       };
     }
-  } catch {}
+  } catch {
+    // shortcut: Si se abre vía file:// o falla config.json, usa DEFAULT_CONFIG como respaldo.
+  }
 
   headersSupabase = {
     apikey: CONFIG.supabase.anonKey,
@@ -365,8 +367,10 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
 
   const uidObjetivo = state.uid;
   const estadoParaServidor = activo ? `PAGANDO_${state.validadorId}` : "Activo";
+  const stageSub = document.getElementById("stageSubtitle");
+
   try {
-    await fetchConTimeout(
+    const res = await fetchConTimeout(
       `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidObjetivo)}`,
       {
         method: "PATCH",
@@ -376,16 +380,23 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
     );
 
     if (activo && state.sesionActiva && state.uid === uidObjetivo) {
-      const stageSub = document.getElementById("stageSubtitle");
+      if (!res.ok) {
+        if (stageSub) stageSub.textContent = "⚠️ No se pudo activar el pago NFC en el servidor.";
+        return;
+      }
       if (stageSub) {
         const nfcOk = !window.AndroidNfc || window.AndroidNfc.tieneNfcActivo();
         stageSub.textContent = nfcOk
-          ? "📲 Antena NFC lista: acerca la espalda de tu celular al lector azul del validador."
+          ? "📲 Listo: acerca la espalda de tu celular al escáner del validador."
           : "⚠️ Enciende el NFC en los ajustes de tu teléfono para pagar acercándolo.";
       }
       timerModoCelular = setTimeout(() => anunciarCelularEnValidadorEspecifico(false), 60000);
     }
-  } catch {}
+  } catch {
+    if (activo && stageSub) {
+      stageSub.textContent = "⚠️ Sin conexión para preparar el pago NFC.";
+    }
+  }
 }
 
 async function notificarCobroExitosoAlValidador(uidObjetivo = state.uid) {
@@ -409,7 +420,6 @@ function mostrarPestana(tabId, silencioso = false) {
     if (!silencioso) mostrarToast("Crea tu cuenta o inicia sesión primero.", "warn");
     tabId = "cuenta";
   }
-  pestanaActual = tabId;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".view-panel").forEach((p) => p.classList.toggle("active", p.id === `view-${tabId}`));
 
@@ -590,7 +600,7 @@ function renderizarHistorial() {
 async function consultarSaldoEnNube() {
   if (!state.sesionActiva || !state.uid || procesandoTransaccion) return;
 
-  // Fix red lenta: si ya hay una consulta en vuelo, se salta este ciclo para dejarla terminar
+  // Si ya hay una consulta en vuelo en red lenta, se salta este ciclo para dejarla terminar
   if (pollingAbortController) return;
 
   const controller = new AbortController();
@@ -1464,13 +1474,12 @@ window.onNativeNfcScanned = function(uidLeido) {
     return;
   }
 
+  // Fuera del modal solo cobra si el chip leído es un sticker validador registrado en config.json
   const tarifaTxt = tarifaEscolarTexto();
   const esStickerValidador = Boolean(CONFIG.stickersValidadores?.[uidLimpio]);
   if (esStickerValidador) {
     state.validadorId = CONFIG.stickersValidadores[uidLimpio];
     guardarPerfilLocal();
-    pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
-  } else if (pestanaActual === "pago") {
     pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
   }
 };
