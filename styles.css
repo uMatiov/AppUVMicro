@@ -1063,3 +1063,22 @@ details.accordion-card[open] summary {
   text-align: center;
   margin-bottom: 14px;
 }
+/* Pantalla de carga mientras Supabase confirma el pago */
+.payment-full-overlay.is-loading {
+  background: linear-gradient(160deg, #0F2537 0%, #1D4ED8 100%);
+  color: #FFFFFF;
+}
+
+.payment-full-overlay.is-loading .overlay-countdown-pill,
+.payment-full-overlay.is-loading .overlay-progress-track {
+  display: none;
+}
+
+.overlay-spinner-svg {
+  animation: tneOverlaySpin 0.9s linear infinite;
+}
+
+@keyframes tneOverlaySpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

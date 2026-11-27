@@ -18,7 +18,7 @@
       <div class="header-actions">
         <div class="cloud-pill" id="syncPill" title="Estado de tu Pase Escolar">
           <span class="status-dot" id="syncDot"></span>
-          <span id="syncText">Pase Activo</span>
+          <span id="syncText">Sin cuenta</span>
         </div>
         <button type="button" class="theme-btn" id="themeToggleBtn" aria-label="Cambiar modo oscuro o claro" title="Modo Oscuro / Claro">
           🌙
@@ -51,7 +51,7 @@
       </div>
 
       <!-- 1. VISTA SALDO -->
-      <section class="view-panel active" id="view-saldo">
+      <section class="view-panel" id="view-saldo">
         <article class="card">
           <div class="tne-strip">
             <span>JUNAEB · Tarjeta Nacional Estudiantil</span>
@@ -60,10 +60,10 @@
 
           <div class="student-row">
             <div>
-              <h2 class="student-name" id="studentNameLabel">Estudiante TNE</h2>
-              <p class="student-meta" id="studentMetaLabel">Educación Superior · Sin RUT</p>
+              <h2 class="student-name" id="studentNameLabel">Sin Cuenta Activa</h2>
+              <p class="student-meta" id="studentMetaLabel">Crea tu cuenta o inicia sesión</p>
             </div>
-            <span class="uid-pill" id="cardStatusBadge">ACTIVA</span>
+            <span class="uid-pill" id="cardStatusBadge">SIN VINCULAR</span>
           </div>
 
           <div class="balance-row">
@@ -108,8 +108,8 @@
 
         <div class="card action-stack">
           <div class="fare-footer">
-            <span>Sector GPS:</span>
-            <select id="zoneSelect" class="zone-select" aria-label="Sector GPS en Valparaíso"></select>
+            <span>Sector de abordaje:</span>
+            <select id="zoneSelect" class="zone-select" aria-label="Sector de abordaje en Valparaíso"></select>
           </div>
 
           <button type="button" class="btn-primary btn-pay-huge" id="payWebBtn">
@@ -131,7 +131,7 @@
         <div class="card">
           <h2 class="section-subtitle">Recargar Saldo en la Cuenta</h2>
           <p class="helper-text">
-            Selecciona o ingresa el monto a abonar en tu Pase Estudiantil:
+            Selecciona o ingresa el monto a abonar en tu Pase Estudiantil (mínimo $200):
           </p>
           <div class="recharge-grid" id="rechargeButtonsContainer"></div>
           <div class="custom-recharge-row">
@@ -160,10 +160,49 @@
         </div>
       </section>
 
-      <!-- 5. VISTA CUENTA (Recuadros vacíos, solo con texto de ejemplo en gris) -->
-      <section class="view-panel" id="view-cuenta">
-        <details class="accordion-card" open>
-          <summary>👤 Datos del Estudiante</summary>
+      <!-- 5. VISTA CUENTA -->
+      <section class="view-panel active" id="view-cuenta">
+        <!-- Tarjeta visible solo cuando el estudiante YA inició sesión -->
+        <article class="card" id="accountProfileCard" style="display: none;">
+          <div class="card-header-inline">
+            <h2 class="section-subtitle">👤 Mi Cuenta Activa</h2>
+            <span class="uid-pill">ACTIVA</span>
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <span class="balance-label">Estudiante</span>
+            <strong id="profileNameText">---</strong>
+          </div>
+          <div class="form-group">
+            <span class="balance-label">RUT · Institución</span>
+            <strong id="profileMetaText">---</strong>
+          </div>
+          <div class="form-group">
+            <span class="balance-label">Correo</span>
+            <strong id="profileEmailText">---</strong>
+          </div>
+          <div class="form-group">
+            <span class="balance-label">Código TNE Vinculada</span>
+            <strong id="profileUidText">---</strong>
+          </div>
+          <button type="button" class="btn-secondary" id="accountLogoutBtn" style="margin-top: 8px;">
+            Cerrar Sesión / Cambiar Cuenta
+          </button>
+        </article>
+
+        <!-- Acceso rápido a Iniciar Sesión (visible cuando no hay sesión activa) -->
+        <div class="card" id="loginPromptCard">
+          <h2 class="section-subtitle">¿Ya tienes una cuenta TNE?</h2>
+          <p class="helper-text">
+            Inicia sesión con tu correo y contraseña para recuperar tu saldo y tu tarjeta vinculada.
+          </p>
+          <button type="button" class="btn-primary" id="openLoginModalBtn" style="margin-top: 8px;">
+            Ya tengo cuenta · Iniciar Sesión
+          </button>
+        </div>
+
+        <!-- Formulario de registro (visible cuando no hay sesión activa) -->
+        <details class="accordion-card" id="registerAccordion" open>
+          <summary>📝 Crear Nueva Cuenta TNE</summary>
           <form id="registerForm" autocomplete="off">
             <div class="form-group">
               <label class="form-label" for="regNombre">Nombre Completo</label>
@@ -183,15 +222,18 @@
             </div>
             <div class="form-group">
               <label class="form-label" for="regPassword">Contraseña</label>
-              <input type="password" id="regPassword" class="form-input" placeholder="Mínimo 4 caracteres" />
+              <input type="password" id="regPassword" class="form-input" placeholder="Mínimo 4 caracteres" minlength="4" required />
             </div>
-            <input type="hidden" id="regUid" />
+            <div class="form-group">
+              <label class="form-label" for="regUid">Código TNE (escanea con NFC o escríbelo)</label>
+              <input type="text" id="regUid" class="form-input" placeholder="Ej: A1B2C3D4 (o usa el botón Vincular TNE)" maxlength="16" autocomplete="off" required />
+            </div>
             <div class="form-group">
               <button type="button" class="btn-secondary" id="scanNfcRegBtn">
-                Vincular TNE
+                📡 Vincular TNE por NFC
               </button>
             </div>
-            <button type="submit" class="btn-primary" style="margin-top:6px;">Guardar mis Datos</button>
+            <button type="submit" class="btn-primary" style="margin-top:6px;">Crear Cuenta y Guardar</button>
           </form>
         </details>
       </section>
@@ -199,7 +241,7 @@
 
     <!-- Barra de navegación inferior -->
     <nav class="bottom-nav" aria-label="Navegación principal">
-      <button type="button" class="tab-btn active" data-tab="saldo">
+      <button type="button" class="tab-btn" data-tab="saldo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         <span>Saldo</span>
       </button>
@@ -215,7 +257,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span>Historial</span>
       </button>
-      <button type="button" class="tab-btn" data-tab="cuenta">
+      <button type="button" class="tab-btn active" data-tab="cuenta">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Cuenta</span>
       </button>

@@ -3,7 +3,8 @@ const DEFAULT_CONFIG = {
     nombre: "Mi Pase TNE · Valparaíso",
     sello: "SELLO 2026",
     intervaloPollingMs: 1500,
-    cooldownSegundos: 3
+    cooldownSegundos: 3,
+    timeoutMs: 8000
   },
   supabase: {
     url: "https://yrbdxblbeezqqlubbxcf.supabase.co",
@@ -28,9 +29,11 @@ const DEFAULT_CONFIG = {
   }
 };
 
-// Limpieza única al actualizar desde la APK anterior que guardaba FCDC1198 por defecto
+// Limpieza única al actualizar desde la versión que precargaba un UID fijo
 if (localStorage.getItem("tne_app_schema") !== "v2_clean_auth") {
+  const darkGuardado = localStorage.getItem("tne_dark_mode");
   localStorage.clear();
+  if (darkGuardado !== null) localStorage.setItem("tne_dark_mode", darkGuardado);
   localStorage.setItem("tne_app_schema", "v2_clean_auth");
 }
 
@@ -38,8 +41,14 @@ let CONFIG = DEFAULT_CONFIG;
 let headersSupabase = {};
 let procesandoTransaccion = false;
 let timerModoCelular = null;
+let pollingTimer = null;
+let pollingAbortController = null;
+let nfcAbortController = null;
+let cooldownIntervalId = null;
+let cooldownSegsRestantes = 0;
+let syncEpoch = 0;
+let pestanaActual = "cuenta";
 
-// Arranca 100% vacío si no hay cuenta iniciada
 let state = {
   sesionActiva: localStorage.getItem("tne_sesion_activa") === "true",
   uid: localStorage.getItem("tne_uid_activo") || "",
@@ -58,12 +67,72 @@ let state = {
   historial: JSON.parse(localStorage.getItem("tne_historial_web") || "[]")
 };
 
+// Fetch con timeout (8s por defecto) y soporte para AbortSignal externo
+async function fetchConTimeout(url, options = {}, timeoutMs = CONFIG.app.timeoutMs || 8000) {
+  const controller = new AbortController();
+  const externalSignal = options.signal;
+  const onExternalAbort = () => controller.abort();
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
+
+  const timerId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { signal: _omit, ...restOptions } = options;
+    return await fetch(url, { ...restOptions, signal: controller.signal });
+  } finally {
+    clearTimeout(timerId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
+  }
+}
+
+function cancelarPollingEnCurso() {
+  syncEpoch += 1;
+  if (pollingAbortController) {
+    try { pollingAbortController.abort(); } catch {}
+    pollingAbortController = null;
+  }
+}
+
 function cambiarModoLectorNativo(activar) {
   try {
     if (window.AndroidNfc && typeof window.AndroidNfc.setModoLecturaTne === "function") {
       window.AndroidNfc.setModoLecturaTne(Boolean(activar));
     }
   } catch {}
+}
+
+// Normaliza y valida RUT Chileno (Módulo 11) -> formato único "21345678-9"
+function normalizarRut(rutRaw) {
+  const limpio = String(rutRaw || "").replace(/[.\-\s]/g, "").toUpperCase();
+  if (!/^[0-9]{7,8}[0-9K]$/.test(limpio)) return "";
+  return `${limpio.slice(0, -1)}-${limpio.slice(-1)}`;
+}
+
+function validarRut(rutRaw) {
+  const normalizado = normalizarRut(rutRaw);
+  if (!normalizado) return false;
+
+  const [cuerpo, dv] = normalizado.split("-");
+  if (/^(\d)\1+$/.test(cuerpo)) return false;
+
+  let suma = 0;
+  let multiplo = 2;
+  for (let i = cuerpo.length - 1; i >= 0; i--) {
+    suma += parseInt(cuerpo.charAt(i), 10) * multiplo;
+    multiplo = multiplo === 7 ? 2 : multiplo + 1;
+  }
+
+  const resto = 11 - (suma % 11);
+  const dvEsperado = resto === 11 ? "0" : resto === 10 ? "K" : String(resto);
+  return dv === dvEsperado;
 }
 
 function limpiarTextosTecnicosHistorial() {
@@ -91,12 +160,42 @@ function limpiarRecuadrosRegistro() {
   });
 }
 
+function iniciarPolling() {
+  detenerPolling();
+  if (document.hidden) return;
+  pollingTimer = setInterval(() => {
+    if (!document.hidden) consultarSaldoEnNube();
+  }, CONFIG.app.intervaloPollingMs);
+}
+
+function detenerPolling() {
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+}
+
+function tarifaEscolarTexto() {
+  return formatearPesos(CONFIG.tarifas.escolar);
+}
+
 async function inicializarApp() {
   try {
-    const res = await fetch("./config.json", { cache: "no-store" });
+    const res = await fetchConTimeout("./config.json", { cache: "no-store" }, 4000);
     if (res.ok) {
       const jsonExterno = await res.json();
-      CONFIG = { ...DEFAULT_CONFIG, ...jsonExterno };
+      CONFIG = {
+        ...DEFAULT_CONFIG,
+        ...jsonExterno,
+        app: { ...DEFAULT_CONFIG.app, ...(jsonExterno.app || {}) },
+        supabase: { ...DEFAULT_CONFIG.supabase, ...(jsonExterno.supabase || {}) },
+        tarifas: { ...DEFAULT_CONFIG.tarifas, ...(jsonExterno.tarifas || {}) },
+        stickersValidadores: {
+          ...DEFAULT_CONFIG.stickersValidadores,
+          ...(jsonExterno.stickersValidadores || {})
+        },
+        zonasMapa: jsonExterno.zonasMapa || DEFAULT_CONFIG.zonasMapa
+      };
     }
   } catch {}
 
@@ -113,7 +212,6 @@ async function inicializarApp() {
   configurarEventos();
   cambiarModoLectorNativo(false);
 
-  // Primera vez sin cuenta: inicia directo en la pestaña "Cuenta" sin datos ajenos
   if (!state.sesionActiva || !state.uid) {
     state.sesionActiva = false;
     state.uid = "";
@@ -129,7 +227,7 @@ async function inicializarApp() {
     await consultarSaldoEnNube();
   }
 
-  setInterval(consultarSaldoEnNube, CONFIG.app.intervaloPollingMs);
+  iniciarPolling();
 }
 
 function aplicarModoOscuro() {
@@ -139,30 +237,60 @@ function aplicarModoOscuro() {
 }
 
 function poblarControlesDesdeConfig() {
+  const tarifaTxt = tarifaEscolarTexto();
+
   const sealBadge = document.getElementById("sealBadge");
   if (sealBadge) sealBadge.textContent = CONFIG.app.sello;
 
   const fareAmountLabel = document.getElementById("fareAmountLabel");
-  if (fareAmountLabel) fareAmountLabel.textContent = `${formatearPesos(CONFIG.tarifas.escolar)} CLP`;
+  if (fareAmountLabel) fareAmountLabel.textContent = `${tarifaTxt} CLP`;
+
+  const payBtnText = document.getElementById("payBtnText");
+  if (payBtnText) payBtnText.textContent = `Pagar Pasaje Escolar (-${tarifaTxt})`;
+
+  const bannerEmergencyBtn = document.getElementById("bannerEmergencyBtn");
+  if (bannerEmergencyBtn) bannerEmergencyBtn.textContent = `Pedir Fiado -${tarifaTxt}`;
+
+  const payViewLoanBtn = document.getElementById("payViewLoanBtn");
+  if (payViewLoanBtn) payViewLoanBtn.textContent = `🆘 Usar Préstamo Escolar de Emergencia (-${tarifaTxt})`;
+
+  const customMontoInput = document.getElementById("customMontoInput");
+  if (customMontoInput) customMontoInput.min = String(CONFIG.tarifas.escolar);
 
   const zoneSelect = document.getElementById("zoneSelect");
   if (zoneSelect) {
-    zoneSelect.innerHTML = Object.keys(CONFIG.zonasMapa)
-      .map((z) => `<option value="${z}" ${z === state.ultimaZona ? "selected" : ""}>📍 ${z}</option>`)
-      .join("");
+    zoneSelect.textContent = "";
+    Object.keys(CONFIG.zonasMapa).forEach((z) => {
+      const opt = document.createElement("option");
+      opt.value = z;
+      opt.textContent = `📍 ${z}`;
+      if (z === state.ultimaZona) opt.selected = true;
+      zoneSelect.appendChild(opt);
+    });
   }
 
   const recargaGrid = document.getElementById("rechargeButtonsContainer");
   if (recargaGrid) {
-    recargaGrid.innerHTML = CONFIG.tarifas.montosRecarga
-      .map((m) => `<button type="button" class="btn-recharge" data-monto="${m}">+${formatearPesos(m)}</button>`)
-      .join("");
+    recargaGrid.textContent = "";
+    CONFIG.tarifas.montosRecarga.forEach((m) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-recharge";
+      btn.dataset.monto = String(m);
+      btn.textContent = `+${formatearPesos(m)}`;
+      recargaGrid.appendChild(btn);
+    });
   }
 }
 
 function formatearPesos(valor) {
   const n = Number(valor) || 0;
   return n < 0 ? `-$${Math.abs(n).toLocaleString("es-CL")}` : `$${n.toLocaleString("es-CL")}`;
+}
+
+function obtenerSaldoVisible() {
+  const saldoBase = state.saldo !== null ? Number(state.saldo) : 0;
+  return state.prestamoEmergencia ? saldoBase - CONFIG.tarifas.escolar : saldoBase;
 }
 
 function sanitizarUid(raw) {
@@ -235,15 +363,19 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
   if (!state.uid || !state.sesionActiva) return;
   clearTimeout(timerModoCelular);
 
+  const uidObjetivo = state.uid;
   const estadoParaServidor = activo ? `PAGANDO_${state.validadorId}` : "Activo";
   try {
-    await fetch(`${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}`, {
-      method: "PATCH",
-      headers: headersSupabase,
-      body: JSON.stringify({ estado: estadoParaServidor })
-    });
+    await fetchConTimeout(
+      `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidObjetivo)}`,
+      {
+        method: "PATCH",
+        headers: headersSupabase,
+        body: JSON.stringify({ estado: estadoParaServidor })
+      }
+    );
 
-    if (activo) {
+    if (activo && state.sesionActiva && state.uid === uidObjetivo) {
       const stageSub = document.getElementById("stageSubtitle");
       if (stageSub) {
         const nfcOk = !window.AndroidNfc || window.AndroidNfc.tieneNfcActivo();
@@ -256,17 +388,19 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
   } catch {}
 }
 
-async function notificarCobroExitosoAlValidador(nuevoSaldo) {
-  if (!state.uid) return;
+async function notificarCobroExitosoAlValidador(uidObjetivo = state.uid) {
+  if (!uidObjetivo) return;
   try {
-    await fetch(`${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}`, {
-      method: "PATCH",
-      headers: headersSupabase,
-      body: JSON.stringify({
-        saldo: nuevoSaldo,
-        estado: `COBRO_OK_${state.validadorId}`
-      })
-    });
+    await fetchConTimeout(
+      `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidObjetivo)}`,
+      {
+        method: "PATCH",
+        headers: headersSupabase,
+        body: JSON.stringify({
+          estado: `COBRO_OK_${state.validadorId}`
+        })
+      }
+    );
   } catch {}
 }
 
@@ -275,14 +409,38 @@ function mostrarPestana(tabId, silencioso = false) {
     if (!silencioso) mostrarToast("Crea tu cuenta o inicia sesión primero.", "warn");
     tabId = "cuenta";
   }
+  pestanaActual = tabId;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".view-panel").forEach((p) => p.classList.toggle("active", p.id === `view-${tabId}`));
 
   if (tabId === "pago" && state.sesionActiva) {
-    cambiarModoLectorNativo(false); // Emulación HCE activa para el lector RFID-RC522
+    cambiarModoLectorNativo(false);
     anunciarCelularEnValidadorEspecifico(true);
   } else {
     anunciarCelularEnValidadorEspecifico(false);
+  }
+}
+
+function actualizarVistaCuenta() {
+  const profileCard = document.getElementById("accountProfileCard");
+  const loginPromptCard = document.getElementById("loginPromptCard");
+  const registerAccordion = document.getElementById("registerAccordion");
+
+  const logueado = Boolean(state.sesionActiva && state.uid);
+  if (profileCard) profileCard.style.display = logueado ? "block" : "none";
+  if (loginPromptCard) loginPromptCard.style.display = logueado ? "none" : "block";
+  if (registerAccordion) registerAccordion.style.display = logueado ? "none" : "block";
+
+  if (logueado) {
+    const pName = document.getElementById("profileNameText");
+    const pMeta = document.getElementById("profileMetaText");
+    const pEmail = document.getElementById("profileEmailText");
+    const pUid = document.getElementById("profileUidText");
+
+    if (pName) pName.textContent = state.nombre || "Estudiante TNE";
+    if (pMeta) pMeta.textContent = `${state.rut || "Sin RUT"} · ${state.institucion || "Educación Superior"}`;
+    if (pEmail) pEmail.textContent = state.correo || "Sin correo";
+    if (pUid) pUid.textContent = state.uid;
   }
 }
 
@@ -294,7 +452,7 @@ function actualizarUI() {
 
   if (!state.sesionActiva || !state.uid) {
     if (nameEl) nameEl.textContent = "Sin Cuenta Activa";
-    if (metaEl) metaEl.textContent = "Crea tu cuenta y vincula tu TNE";
+    if (metaEl) metaEl.textContent = "Crea tu cuenta o inicia sesión";
     if (statusBadgeEl) statusBadgeEl.textContent = "SIN VINCULAR";
     if (syncText) syncText.textContent = "Sin cuenta";
   } else {
@@ -303,9 +461,12 @@ function actualizarUI() {
     if (statusBadgeEl) statusBadgeEl.textContent = "ACTIVA";
   }
 
-  const saldoBase = state.saldo !== null ? Number(state.saldo) : 0;
-  const saldoMostrado = state.prestamoEmergencia && saldoBase === 0 ? -CONFIG.tarifas.escolar : saldoBase;
-  const viajes = Math.max(0, Math.floor(saldoBase / CONFIG.tarifas.escolar));
+  actualizarVistaCuenta();
+
+  const saldoCargado = state.saldo !== null;
+  const saldoMostrado = obtenerSaldoVisible();
+  const viajes = Math.max(0, Math.floor(saldoMostrado / CONFIG.tarifas.escolar));
+  const tarifaTxt = tarifaEscolarTexto();
 
   const balanceEl = document.getElementById("balanceDisplay");
   const tripsEl = document.getElementById("tripsLeftLabel");
@@ -313,27 +474,34 @@ function actualizarUI() {
   const fareFooterBox = document.getElementById("fareFooterBox");
 
   if (balanceEl && tripsEl && eyeLabel) {
-    balanceEl.classList.toggle("negative-loan", saldoMostrado < 0);
+    balanceEl.classList.toggle("negative-loan", saldoCargado && saldoMostrado < 0);
     if (state.ocultarSaldo) {
       balanceEl.textContent = "$ ••••••";
       tripsEl.textContent = "Viajes: •••";
       eyeLabel.textContent = "🙈 Mostrar";
+    } else if (state.sesionActiva && !saldoCargado) {
+      balanceEl.textContent = "Cargando...";
+      tripsEl.textContent = "Sincronizando...";
+      eyeLabel.textContent = "👁️ Ocultar";
     } else {
       balanceEl.textContent = formatearPesos(saldoMostrado);
       tripsEl.textContent = state.prestamoEmergencia
-        ? "⚠️ En Préstamo (-$200)"
+        ? `⚠️ En Préstamo (-${tarifaTxt})`
         : `Viajes: ${viajes}`;
       eyeLabel.textContent = "👁️ Ocultar";
     }
   }
 
   if (fareFooterBox) {
-    fareFooterBox.classList.toggle("critical-balance", state.sesionActiva && !state.ocultarSaldo && viajes <= 1);
+    fareFooterBox.classList.toggle(
+      "critical-balance",
+      state.sesionActiva && saldoCargado && !state.ocultarSaldo && viajes <= 1
+    );
   }
 
   const necesitaPrestamo =
     state.sesionActiva &&
-    state.saldo !== null &&
+    saldoCargado &&
     Number(state.saldo) < CONFIG.tarifas.escolar &&
     !state.prestamoEmergencia;
 
@@ -358,8 +526,52 @@ function registrarMovimientoLocal(titulo, monto, saldoFinal) {
   renderizarHistorial();
 }
 
+function poblarListaHistorial(contenedor, items) {
+  contenedor.textContent = "";
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.className = "history-item";
+    const span = document.createElement("span");
+    span.className = "history-time";
+    span.textContent = "Sin movimientos registrados";
+    li.appendChild(span);
+    contenedor.appendChild(li);
+    return;
+  }
+
+  items.forEach((m) => {
+    const esPos = Number(m.monto) > 0;
+    const saldoTxt = state.ocultarSaldo ? "$ ••••••" : formatearPesos(m.saldoFinal);
+
+    const li = document.createElement("li");
+    li.className = "history-item";
+
+    const left = document.createElement("div");
+    left.className = "history-left";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "history-title";
+    titleSpan.textContent = String(m.titulo || "Movimiento");
+
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "history-time";
+    timeSpan.textContent = `${m.hora || ""} · 📍 ${m.zona || "Valparaíso"} · Saldo: ${saldoTxt}`;
+
+    left.appendChild(titleSpan);
+    left.appendChild(timeSpan);
+
+    const amountSpan = document.createElement("span");
+    amountSpan.className = `history-amount ${esPos ? "pos" : "neg"}`;
+    amountSpan.textContent = `${esPos ? "+" : ""}${formatearPesos(m.monto)}`;
+
+    li.appendChild(left);
+    li.appendChild(amountSpan);
+    contenedor.appendChild(li);
+  });
+}
+
 function renderizarHistorial() {
-  const cobros = state.historial.filter((m) => m.monto < 0).length;
+  const cobros = state.historial.filter((m) => Number(m.monto) < 0).length;
   const ahorro = cobros * (CONFIG.tarifas.adultoReferencia - CONFIG.tarifas.escolar);
 
   const statTripsEl = document.getElementById("statTripsCount");
@@ -371,44 +583,38 @@ function renderizarHistorial() {
   const homeMini = document.getElementById("homeMiniHistory");
   if (!historyList || !homeMini) return;
 
-  if (!state.historial.length) {
-    const vacio = `<li class="history-item"><span class="history-time">Sin movimientos registrados</span></li>`;
-    historyList.innerHTML = vacio;
-    homeMini.innerHTML = vacio;
-    return;
-  }
-
-  const renderFilas = (items) =>
-    items
-      .map((m) => {
-        const esPos = m.monto > 0;
-        const signo = esPos ? "+" : "";
-        const saldoTxt = state.ocultarSaldo ? "$ ••••••" : formatearPesos(m.saldoFinal);
-        return `
-        <li class="history-item">
-          <div class="history-left">
-            <span class="history-title">${m.titulo}</span>
-            <span class="history-time">${m.hora} · 📍 ${m.zona || "Valparaíso"} · Saldo: ${saldoTxt}</span>
-          </div>
-          <span class="history-amount ${esPos ? "pos" : "neg"}">${signo}${formatearPesos(m.monto)}</span>
-        </li>`;
-      })
-      .join("");
-
-  historyList.innerHTML = renderFilas(state.historial);
-  homeMini.innerHTML = renderFilas(state.historial.slice(0, 2));
+  poblarListaHistorial(historyList, state.historial);
+  poblarListaHistorial(homeMini, state.historial.slice(0, 2));
 }
 
 async function consultarSaldoEnNube() {
   if (!state.sesionActiva || !state.uid || procesandoTransaccion) return;
+
+  // Fix red lenta: si ya hay una consulta en vuelo, se salta este ciclo para dejarla terminar
+  if (pollingAbortController) return;
+
+  const controller = new AbortController();
+  pollingAbortController = controller;
+  const epochInicio = syncEpoch;
+  const uidInicio = state.uid;
+
   const syncDot = document.getElementById("syncDot");
   const syncText = document.getElementById("syncText");
 
   try {
-    const url = `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}&select=*`;
-    const res = await fetch(url, { headers: headersSupabase, cache: "no-store" });
+    const columnas = "uid,nombre,rut,institucion,correo,saldo,estado";
+    const url = `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidInicio)}&select=${columnas}`;
+    const res = await fetchConTimeout(url, {
+      headers: headersSupabase,
+      cache: "no-store",
+      signal: controller.signal
+    });
     if (!res.ok) throw new Error("Error de red");
     const lista = await res.json();
+
+    if (procesandoTransaccion || epochInicio !== syncEpoch || uidInicio !== state.uid || !state.sesionActiva) {
+      return;
+    }
 
     if (syncDot) syncDot.classList.remove("offline");
 
@@ -423,9 +629,6 @@ async function consultarSaldoEnNube() {
       if (datos.correo) state.correo = datos.correo;
 
       const nuevoSaldo = Number(datos.saldo);
-      if (nuevoSaldo >= CONFIG.tarifas.escolar && state.prestamoEmergencia) {
-        state.prestamoEmergencia = false;
-      }
 
       if (state.saldo !== null && Number.isFinite(nuevoSaldo) && nuevoSaldo < state.saldo) {
         const descuento = nuevoSaldo - state.saldo;
@@ -437,12 +640,15 @@ async function consultarSaldoEnNube() {
           "¡Pasaje Aprobado!",
           `Tarifa Escolar (${formatearPesos(descuento)}) · ¡Buen viaje!`
         );
-        registrarMovimientoLocal("Pasaje Escolar Micro", descuento, nuevoSaldo);
+        registrarMovimientoLocal("Pasaje Escolar Micro", descuento, obtenerSaldoVisible());
       } else if (state.saldo !== null && Number.isFinite(nuevoSaldo) && nuevoSaldo > state.saldo) {
         const abono = nuevoSaldo - state.saldo;
         state.saldo = nuevoSaldo;
-        registrarMovimientoLocal("Recarga de Saldo", abono, nuevoSaldo);
-      } else {
+        if (nuevoSaldo >= CONFIG.tarifas.escolar && state.prestamoEmergencia) {
+          state.prestamoEmergencia = false;
+        }
+        registrarMovimientoLocal("Recarga de Saldo", abono, obtenerSaldoVisible());
+      } else if (Number.isFinite(nuevoSaldo)) {
         state.saldo = nuevoSaldo;
       }
 
@@ -456,14 +662,67 @@ async function consultarSaldoEnNube() {
       if (syncText) syncText.textContent = "Activar Pase";
       actualizarUI();
     }
-  } catch {
+  } catch (err) {
+    if (err?.name === "AbortError" && (epochInicio !== syncEpoch || pollingAbortController !== controller)) {
+      return;
+    }
     if (syncDot) syncDot.classList.add("offline");
     if (syncText) syncText.textContent = "Sin conexión";
+  } finally {
+    if (pollingAbortController === controller) {
+      pollingAbortController = null;
+    }
   }
 }
 
 let overlayTimer = null;
 let overlayCountdownInterval = null;
+
+function ocultarPantallaCompletaPago() {
+  const overlay = document.getElementById("paymentFullOverlay");
+  clearTimeout(overlayTimer);
+  clearInterval(overlayCountdownInterval);
+  if (overlay) {
+    overlay.className = "payment-full-overlay";
+    overlay.setAttribute("aria-hidden", "true");
+  }
+}
+
+// Pantalla de carga en pantalla completa mientras el celular espera respuesta de Supabase
+function mostrarPantallaCargaPago(
+  titulo = "Validando Pasaje...",
+  subtitulo = "Esperando confirmación del servidor..."
+) {
+  const overlay = document.getElementById("paymentFullOverlay");
+  const badge = document.getElementById("overlayTopBadge");
+  const iconBox = document.getElementById("overlayIconBox");
+  const titleEl = document.getElementById("overlayTitle");
+  const subEl = document.getElementById("overlaySubtitle");
+  const studentEl = document.getElementById("overlayStudentName");
+  const zoneEl = document.getElementById("overlayZoneName");
+  const balanceEl = document.getElementById("overlayBalance");
+
+  if (!overlay) return;
+
+  clearTimeout(overlayTimer);
+  clearInterval(overlayCountdownInterval);
+
+  overlay.className = "payment-full-overlay show is-loading";
+  overlay.setAttribute("aria-hidden", "false");
+
+  badge.textContent = "• PROCESANDO PAGO";
+  titleEl.textContent = titulo;
+  subEl.textContent = subtitulo;
+  studentEl.textContent = state.nombre || "Estudiante TNE";
+  if (zoneEl) zoneEl.textContent = state.ultimaZona || "Valparaíso";
+  balanceEl.textContent = "Verificando...";
+
+  iconBox.innerHTML = `
+    <svg class="overlay-spinner-svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9" stroke-opacity="0.25"></circle>
+      <path d="M21 12a9 9 0 0 0-9-9"></path>
+    </svg>`;
+}
 
 function mostrarPantallaCompletaPago(aprobado, titulo, subtitulo) {
   const overlay = document.getElementById("paymentFullOverlay");
@@ -491,8 +750,7 @@ function mostrarPantallaCompletaPago(aprobado, titulo, subtitulo) {
   studentEl.textContent = state.nombre || "Estudiante TNE";
   if (zoneEl) zoneEl.textContent = state.ultimaZona || "Valparaíso";
 
-  const saldoReal = state.prestamoEmergencia && state.saldo === 0 ? -CONFIG.tarifas.escolar : state.saldo;
-  balanceEl.textContent = state.ocultarSaldo ? "$ ••••••" : formatearPesos(saldoReal);
+  balanceEl.textContent = state.ocultarSaldo ? "$ ••••••" : formatearPesos(obtenerSaldoVisible());
 
   if (aprobado) {
     iconBox.innerHTML = `
@@ -526,132 +784,189 @@ function mostrarPantallaCompletaPago(aprobado, titulo, subtitulo) {
   }, 1000);
 
   overlayTimer = setTimeout(() => {
-    overlay.classList.remove("show");
-    overlay.setAttribute("aria-hidden", "true");
-    clearInterval(overlayCountdownInterval);
+    ocultarPantallaCompletaPago();
   }, segundosTotales * 1000);
 }
 
-function iniciarCooldownAntiDobleCobro() {
-  state.bloqueoCobro = true;
+function actualizarEstadoBotonPago() {
   const payBtn = document.getElementById("payWebBtn");
   const payBtnText = document.getElementById("payBtnText");
-  let segs = CONFIG.app.cooldownSegundos || 3;
+  if (!payBtn || !payBtnText) return;
 
-  if (payBtn && payBtnText) {
+  if (state.bloqueoCobro && cooldownSegsRestantes > 0) {
     payBtn.disabled = true;
-    payBtnText.textContent = `⏳ Espera ${segs}s...`;
+    payBtnText.textContent = procesandoTransaccion
+      ? `⏳ Validando (${cooldownSegsRestantes}s)...`
+      : `⏳ Espera ${cooldownSegsRestantes}s...`;
+  } else if (procesandoTransaccion) {
+    payBtn.disabled = true;
+    payBtnText.textContent = "⏳ Validando pago...";
+  } else {
+    payBtn.disabled = false;
+    payBtnText.textContent = `Pagar Pasaje Escolar (-${tarifaEscolarTexto()})`;
   }
+}
 
-  const timer = setInterval(() => {
-    segs -= 1;
-    if (segs > 0 && payBtnText) {
-      payBtnText.textContent = `⏳ Espera ${segs}s...`;
-    } else {
-      clearInterval(timer);
+function iniciarCooldownAntiDobleCobro() {
+  clearInterval(cooldownIntervalId);
+  state.bloqueoCobro = true;
+  cooldownSegsRestantes = CONFIG.app.cooldownSegundos || 3;
+  actualizarEstadoBotonPago();
+
+  cooldownIntervalId = setInterval(() => {
+    cooldownSegsRestantes -= 1;
+    if (cooldownSegsRestantes <= 0) {
+      clearInterval(cooldownIntervalId);
+      cooldownIntervalId = null;
       state.bloqueoCobro = false;
-      if (payBtn && payBtnText) {
-        payBtn.disabled = false;
-        payBtnText.textContent = "Pagar Pasaje Escolar (-$200)";
-      }
     }
+    actualizarEstadoBotonPago();
   }, 1000);
 }
 
+// Cobro estricto con pantalla de carga y protección contra cierre de sesión en curso
 async function pagarPasajeWeb(origenCobro = "Pago Móvil Micro") {
   if (!state.sesionActiva || !state.uid) {
     mostrarToast("Primero registra tu cuenta y vincula tu TNE.", "warn");
     mostrarPestana("cuenta", true);
     return;
   }
+  if (procesandoTransaccion) {
+    mostrarToast("⏳ Ya hay un pago en proceso, espera un momento.", "warn");
+    return;
+  }
   if (state.bloqueoCobro) {
-    mostrarToast("⏳ Espera 3 segundos antes de volver a validar.", "warn");
+    mostrarToast(`⏳ Espera ${CONFIG.app.cooldownSegundos || 3} segundos antes de volver a validar.`, "warn");
+    return;
+  }
+  if (state.saldo === null) {
+    mostrarToast("⏳ Aún se está cargando tu saldo, intenta en un segundo.", "warn");
+    consultarSaldoEnNube();
     return;
   }
 
   const tarifa = CONFIG.tarifas.escolar;
-  const saldoPrevio = state.saldo !== null ? Number(state.saldo) : 0;
+  const tarifaTxt = tarifaEscolarTexto();
+  const saldoPrevio = Number(state.saldo);
 
   if (saldoPrevio < tarifa) {
     reproducirFeedbackSensorial(false);
     mostrarPantallaCompletaPago(
       false,
       "Saldo Insuficiente",
-      "Tienes menos de $200. Activa el Préstamo Escolar de Emergencia abajo."
+      `Tienes menos de ${tarifaTxt}. Activa el Préstamo Escolar de Emergencia abajo.`
     );
     actualizarUI();
     return;
   }
 
+  const uidOperacion = state.uid;
   procesandoTransaccion = true;
+  cancelarPollingEnCurso();
   iniciarCooldownAntiDobleCobro();
+  mostrarPantallaCargaPago("Validando Pasaje...", "Esperando confirmación del servidor...");
 
   try {
-    const res = await fetch(`${CONFIG.supabase.url}/rest/v1/rpc/descontar_saldo`, {
+    const res = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/descontar_saldo`, {
       method: "POST",
       headers: headersSupabase,
-      body: JSON.stringify({ card_uid: state.uid })
+      body: JSON.stringify({ card_uid: uidOperacion })
     });
+
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
     const data = await res.json();
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
 
-    let cobroExitoso = false;
-    let nuevoSaldoCalculado = saldoPrevio - tarifa;
+    const cobroConfirmado = Boolean(data && (data.status === "concedido" || data.exito === true));
 
-    if (data && (data.status === "concedido" || data.exito === true)) {
-      const saldoDevuelto =
+    if (cobroConfirmado) {
+      const saldoServidor =
         data.saldo_restante !== undefined
           ? Number(data.saldo_restante)
           : data.nuevo_saldo !== undefined
           ? Number(data.nuevo_saldo)
-          : nuevoSaldoCalculado;
+          : saldoPrevio - tarifa;
 
-      if (saldoDevuelto < saldoPrevio) {
-        nuevoSaldoCalculado = saldoDevuelto;
-      }
-      cobroExitoso = true;
-    } else if (saldoPrevio >= tarifa) {
-      cobroExitoso = true;
-    }
+      await notificarCobroExitosoAlValidador(uidOperacion);
+      if (!state.sesionActiva || state.uid !== uidOperacion) return;
 
-    if (cobroExitoso) {
-      state.saldo = nuevoSaldoCalculado;
-      await notificarCobroExitosoAlValidador(nuevoSaldoCalculado);
+      state.saldo = Number.isFinite(saldoServidor) ? saldoServidor : saldoPrevio - tarifa;
       guardarPerfilLocal();
       actualizarUI();
       reproducirFeedbackSensorial(true);
-      registrarMovimientoLocal(origenCobro, -tarifa, state.saldo);
-      mostrarPantallaCompletaPago(true, "¡Pasaje Aprobado!", "Tarifa Estudiante (-$200) · ¡Buen viaje!");
+      registrarMovimientoLocal(origenCobro, -tarifa, obtenerSaldoVisible());
+      mostrarPantallaCompletaPago(true, "¡Pasaje Aprobado!", `Tarifa Estudiante (-${tarifaTxt}) · ¡Buen viaje!`);
     } else {
       reproducirFeedbackSensorial(false);
-      mostrarPantallaCompletaPago(false, "Pago No Realizado", "Verifica tu saldo disponible.");
+      mostrarPantallaCompletaPago(
+        false,
+        "Pago Rechazado",
+        data?.mensaje || "El servidor rechazó el cobro. Verifica tu saldo."
+      );
     }
-  } catch {
+  } catch (err) {
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
     reproducirFeedbackSensorial(false);
-    mostrarToast("No se pudo procesar el pago. Revisa tu conexión.", "err");
+    const esTimeout = err?.name === "AbortError";
+    mostrarPantallaCompletaPago(
+      false,
+      esTimeout ? "Tiempo Agotado" : "Error de Conexión",
+      esTimeout
+        ? "La red tardó demasiado. Revisa tu saldo antes de reintentar."
+        : "No se pudo validar el pasaje con el servidor."
+    );
   } finally {
+    syncEpoch += 1;
     procesandoTransaccion = false;
+    actualizarEstadoBotonPago();
   }
 }
 
 async function activarPrestamoEmergencia() {
-  if (state.prestamoEmergencia) {
-    mostrarToast("Ya tienes 1 Préstamo Escolar activo (-$200).", "warn");
+  if (!state.sesionActiva || !state.uid) return;
+  if (procesandoTransaccion) {
+    mostrarToast("⏳ Espera a que termine la operación actual.", "warn");
+    return;
+  }
+  if (state.saldo === null) {
+    mostrarToast("⏳ Aún se está cargando tu saldo, intenta en un segundo.", "warn");
+    consultarSaldoEnNube();
     return;
   }
 
-  state.prestamoEmergencia = true;
-  state.saldo = 0;
-  guardarPerfilLocal();
+  const tarifaTxt = tarifaEscolarTexto();
+  if (state.prestamoEmergencia) {
+    mostrarToast(`Ya tienes 1 Préstamo Escolar activo (-${tarifaTxt}).`, "warn");
+    return;
+  }
+
+  const uidOperacion = state.uid;
+  procesandoTransaccion = true;
+  cancelarPollingEnCurso();
   iniciarCooldownAntiDobleCobro();
-  reproducirFeedbackSensorial(true);
-  await notificarCobroExitosoAlValidador(0);
-  registrarMovimientoLocal("Préstamo Escolar de Emergencia", -CONFIG.tarifas.escolar, -CONFIG.tarifas.escolar);
-  actualizarUI();
-  mostrarPantallaCompletaPago(
-    true,
-    "¡Viaje de Emergencia!",
-    "Préstamo Escolar activado (-$200). Se descontará en tu próxima recarga."
-  );
+  mostrarPantallaCargaPago("Activando Préstamo...", "Sincronizando viaje de emergencia...");
+
+  try {
+    await notificarCobroExitosoAlValidador(uidOperacion);
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
+
+    state.prestamoEmergencia = true;
+    guardarPerfilLocal();
+    reproducirFeedbackSensorial(true);
+    registrarMovimientoLocal("Préstamo Escolar de Emergencia", -CONFIG.tarifas.escolar, obtenerSaldoVisible());
+    actualizarUI();
+    mostrarPantallaCompletaPago(
+      true,
+      "¡Viaje de Emergencia!",
+      `Préstamo Escolar activado (-${tarifaTxt}). Se descontará en tu próxima recarga.`
+    );
+  } finally {
+    syncEpoch += 1;
+    procesandoTransaccion = false;
+    actualizarEstadoBotonPago();
+  }
 }
 
 async function recargarSaldoWeb(monto) {
@@ -660,20 +975,50 @@ async function recargarSaldoWeb(monto) {
     mostrarPestana("cuenta", true);
     return;
   }
-  const valor = parseInt(monto, 10);
-  if (!Number.isFinite(valor) || valor <= 0) return;
+  if (procesandoTransaccion) {
+    mostrarToast("⏳ Hay una operación en curso, espera un momento.", "warn");
+    return;
+  }
 
+  const valor = parseInt(monto, 10);
+  const minimo = CONFIG.tarifas.escolar || 200;
+  const tarifaTxt = tarifaEscolarTexto();
+  if (!Number.isFinite(valor) || valor < minimo) {
+    mostrarToast(`El monto mínimo de recarga es ${formatearPesos(minimo)}.`, "warn");
+    return;
+  }
+
+  const uidOperacion = state.uid;
   const teniaPrestamo = state.prestamoEmergencia;
   const montoEfectivo = teniaPrestamo ? Math.max(0, valor - CONFIG.tarifas.escolar) : valor;
 
+  if (teniaPrestamo && montoEfectivo === 0) {
+    cancelarPollingEnCurso();
+    state.prestamoEmergencia = false;
+    guardarPerfilLocal();
+    reproducirFeedbackSensorial(true);
+    registrarMovimientoLocal(`Recarga (Saldó préstamo -${tarifaTxt})`, 0, obtenerSaldoVisible());
+    actualizarUI();
+    mostrarToast(`✔ Préstamo escolar de ${tarifaTxt} saldado correctamente`, "ok");
+    return;
+  }
+
   procesandoTransaccion = true;
+  cancelarPollingEnCurso();
+  actualizarEstadoBotonPago();
+
   try {
-    const res = await fetch(`${CONFIG.supabase.url}/rest/v1/rpc/recargar_saldo`, {
+    const res = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/recargar_saldo`, {
       method: "POST",
       headers: headersSupabase,
-      body: JSON.stringify({ card_uid: state.uid, monto: montoEfectivo })
+      body: JSON.stringify({ card_uid: uidOperacion, monto: montoEfectivo })
     });
+
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
     const data = await res.json();
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
 
     if (data && (data.status === "exito" || data.exito === true)) {
       state.prestamoEmergencia = false;
@@ -681,27 +1026,44 @@ async function recargarSaldoWeb(monto) {
       guardarPerfilLocal();
       reproducirFeedbackSensorial(true);
       registrarMovimientoLocal(
-        teniaPrestamo ? "Recarga (Saldó préstamo -$200)" : "Recarga de Saldo",
+        teniaPrestamo ? `Recarga (Saldó préstamo -${tarifaTxt})` : "Recarga de Saldo",
         montoEfectivo,
-        state.saldo
+        obtenerSaldoVisible()
       );
       actualizarUI();
       mostrarToast(
         teniaPrestamo
-          ? `✔ Recarga +${formatearPesos(valor)} (Se descontaron -$200 del préstamo)`
+          ? `✔ Recarga +${formatearPesos(valor)} (Se descontaron -${tarifaTxt} del préstamo)`
           : `✔ Recarga exitosa (+${formatearPesos(valor)})`,
         "ok"
       );
     } else {
       reproducirFeedbackSensorial(false);
-      mostrarToast("No se pudo completar la recarga.", "err");
+      mostrarToast(data?.mensaje || "No se pudo completar la recarga.", "err");
     }
-  } catch {
+  } catch (err) {
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
     reproducirFeedbackSensorial(false);
-    mostrarToast("Sin conexión para recargar en este momento.", "err");
+    mostrarToast(
+      err?.name === "AbortError"
+        ? "Tiempo de espera agotado al recargar."
+        : "Sin conexión para recargar en este momento.",
+      "err"
+    );
   } finally {
+    syncEpoch += 1;
     procesandoTransaccion = false;
-    await consultarSaldoEnNube();
+    actualizarEstadoBotonPago();
+    if (state.sesionActiva && state.uid === uidOperacion) {
+      await consultarSaldoEnNube();
+    }
+  }
+}
+
+function detenerEscaneoWebNfc() {
+  if (nfcAbortController) {
+    try { nfcAbortController.abort(); } catch {}
+    nfcAbortController = null;
   }
 }
 
@@ -714,7 +1076,6 @@ function abrirMenuGuiaNfc(tituloModal, callbackUid) {
   if (titleEl) titleEl.textContent = tituloModal;
   if (modal) modal.classList.add("open");
 
-  // Activa ReaderMode nativo de Android (lee TNE física Mifare Classic al instante)
   cambiarModoLectorNativo(true);
 
   if (window.AndroidNfc) {
@@ -729,25 +1090,81 @@ function abrirMenuGuiaNfc(tituloModal, callbackUid) {
 
   if (statusEl) statusEl.textContent = "📡 Apoya tu TNE física detrás del teléfono...";
   if ("NDEFReader" in window) {
+    detenerEscaneoWebNfc();
+    nfcAbortController = new AbortController();
     try {
       const ndef = new NDEFReader();
-      ndef.scan().then(() => {
+      ndef.scan({ signal: nfcAbortController.signal }).then(() => {
         ndef.onreading = (event) => {
           if (event.serialNumber) window.onNativeNfcScanned(event.serialNumber);
         };
-      }).catch(() => {});
+      }).catch(() => {
+        if (statusEl) {
+          statusEl.textContent = "⚠️ Web NFC no disponible o sin permiso. Puedes escribir el código TNE manualmente.";
+        }
+      });
     } catch {}
+  } else if (statusEl) {
+    statusEl.textContent = "ℹ️ Este navegador no soporta lectura NFC. Escribe tu código TNE en el campo manual.";
   }
 }
 
 function cerrarMenuGuiaNfc() {
   window.callbackNfcGuiaActivo = null;
+  detenerEscaneoWebNfc();
   document.getElementById("nfcGuideModalBackdrop")?.classList.remove("open");
-  // Apaga ReaderMode para reactivar HCE (pago sin contacto en RC522)
   cambiarModoLectorNativo(false);
 }
 
+function cerrarSesionUsuario() {
+  anunciarCelularEnValidadorEspecifico(false);
+  cancelarPollingEnCurso();
+  cambiarModoLectorNativo(false);
+  cerrarMenuGuiaNfc();
+  ocultarPantallaCompletaPago();
+
+  clearInterval(cooldownIntervalId);
+  cooldownIntervalId = null;
+  cooldownSegsRestantes = 0;
+  procesandoTransaccion = false;
+
+  const modoOscuroActual = state.modoOscuro;
+  localStorage.clear();
+  localStorage.setItem("tne_app_schema", "v2_clean_auth");
+  localStorage.setItem("tne_dark_mode", String(modoOscuroActual));
+
+  state.sesionActiva = false;
+  state.uid = "";
+  state.nombre = "";
+  state.rut = "";
+  state.correo = "";
+  state.institucion = "Educación Superior";
+  state.saldo = 0;
+  state.estado = "Inactivo";
+  state.prestamoEmergencia = false;
+  state.ocultarSaldo = false;
+  state.bloqueoCobro = false;
+  state.historial = [];
+
+  limpiarRecuadrosRegistro();
+  actualizarEstadoBotonPago();
+  actualizarUI();
+  renderizarHistorial();
+  mostrarPestana("cuenta", true);
+  mostrarToast("Sesión cerrada. Registra una nueva cuenta o inicia sesión.", "ok");
+}
+
 function configurarEventos() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      detenerPolling();
+      cancelarPollingEnCurso();
+    } else {
+      consultarSaldoEnNube();
+      iniciarPolling();
+    }
+  });
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => mostrarPestana(btn.dataset.tab));
   });
@@ -778,16 +1195,16 @@ function configurarEventos() {
   document.getElementById("bannerEmergencyBtn")?.addEventListener("click", activarPrestamoEmergencia);
   document.getElementById("payViewLoanBtn")?.addEventListener("click", activarPrestamoEmergencia);
 
+  // Solo permite cerrar el overlay al tocarlo si ya terminó de cargar
   document.getElementById("paymentFullOverlay")?.addEventListener("click", () => {
     const overlay = document.getElementById("paymentFullOverlay");
-    overlay?.classList.remove("show");
-    clearTimeout(overlayTimer);
-    clearInterval(overlayCountdownInterval);
+    if (overlay && !overlay.classList.contains("is-loading")) {
+      ocultarPantallaCompletaPago();
+    }
   });
 
   document.getElementById("closeNfcGuideBtn")?.addEventListener("click", cerrarMenuGuiaNfc);
 
-  // Botón "Cambiar TNE" (pestaña Pagar)
   document.getElementById("scanNfcWalletBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Cambiar TNE", (uidLeido) => {
       const validadorAsociado = CONFIG.stickersValidadores?.[uidLeido];
@@ -796,8 +1213,10 @@ function configurarEventos() {
         guardarPerfilLocal();
         pagarPasajeWeb("Pago NFC Micro");
       } else {
+        cancelarPollingEnCurso();
         state.uid = uidLeido;
         state.saldo = null;
+        state.prestamoEmergencia = false;
         guardarPerfilLocal();
         actualizarUI();
         consultarSaldoEnNube();
@@ -806,7 +1225,6 @@ function configurarEventos() {
     });
   });
 
-  // Botón "Vincular TNE" (pestaña Cuenta)
   document.getElementById("scanNfcRegBtn")?.addEventListener("click", () => {
     abrirMenuGuiaNfc("Vincular TNE", (uidHex) => {
       const regUidInput = document.getElementById("regUid");
@@ -823,10 +1241,12 @@ function configurarEventos() {
 
   document.getElementById("customRechargeBtn")?.addEventListener("click", () => {
     const input = document.getElementById("customMontoInput");
-    if (input && input.value) {
-      recargarSaldoWeb(input.value);
-      input.value = "";
+    if (!input || !input.value) {
+      mostrarToast(`Ingresa un monto a recargar (mínimo ${tarifaEscolarTexto()}).`, "warn");
+      return;
     }
+    recargarSaldoWeb(input.value);
+    input.value = "";
   });
 
   document.getElementById("clearHistoryBtn")?.addEventListener("click", () => {
@@ -835,135 +1255,202 @@ function configurarEventos() {
     renderizarHistorial();
   });
 
-  // Cerrar sesión deja la app 100% limpia en Cuenta
-  document.getElementById("logoutBtn")?.addEventListener("click", () => {
-    anunciarCelularEnValidadorEspecifico(false);
-    cambiarModoLectorNativo(false);
-    localStorage.clear();
-    localStorage.setItem("tne_app_schema", "v2_clean_auth");
-    state.sesionActiva = false;
-    state.uid = "";
-    state.nombre = "";
-    state.rut = "";
-    state.correo = "";
-    state.saldo = 0;
-    state.historial = [];
-    limpiarRecuadrosRegistro();
-    actualizarUI();
-    renderizarHistorial();
-    mostrarPestana("cuenta", true);
-    mostrarToast("Sesión cerrada. Registra una nueva cuenta o inicia sesión.", "ok");
+  document.getElementById("logoutBtn")?.addEventListener("click", cerrarSesionUsuario);
+  document.getElementById("accountLogoutBtn")?.addEventListener("click", cerrarSesionUsuario);
+
+  const loginBackdrop = document.getElementById("loginModalBackdrop");
+  document.getElementById("openLoginModalBtn")?.addEventListener("click", () => {
+    loginBackdrop?.classList.add("open");
   });
 
-  document.getElementById("openLoginModalBtn")?.addEventListener("click", () => {
-    document.getElementById("loginModalBackdrop")?.classList.add("open");
+  loginBackdrop?.addEventListener("click", (e) => {
+    if (e.target === loginBackdrop) loginBackdrop.classList.remove("open");
   });
 
   document.getElementById("goToRegisterFromLogin")?.addEventListener("click", () => {
-    document.getElementById("loginModalBackdrop")?.classList.remove("open");
+    loginBackdrop?.classList.remove("open");
     limpiarRecuadrosRegistro();
     mostrarPestana("cuenta", true);
   });
 
   document.getElementById("loginForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (procesandoTransaccion) return;
+
     const correo = document.getElementById("loginCorreo").value.trim();
     const pass = document.getElementById("loginPassword").value.trim();
+    if (!correo || pass.length < 4) {
+      mostrarToast("Ingresa tu correo y una contraseña válida.", "warn");
+      return;
+    }
+
+    procesandoTransaccion = true;
+    cancelarPollingEnCurso();
+
     try {
-      const res = await fetch(`${CONFIG.supabase.url}/rest/v1/rpc/login_tne`, {
+      const res = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/login_tne`, {
         method: "POST",
         headers: headersSupabase,
         body: JSON.stringify({ p_correo: correo, p_password: pass })
       });
-      const data = await res.json();
-      if (data && (data.status === "exito" || data.exito === true || data.uid)) {
-        state.sesionActiva = true;
-        if (data.uid) state.uid = sanitizarUid(data.uid);
-        if (data.nombre) state.nombre = data.nombre;
-        if (data.rut) state.rut = data.rut;
-        state.correo = correo;
-        state.saldo = null;
-        guardarPerfilLocal();
-        document.getElementById("loginModalBackdrop")?.classList.remove("open");
-        limpiarRecuadrosRegistro();
-        actualizarUI();
-        await consultarSaldoEnNube();
-        mostrarPestana("saldo", true);
-      } else {
-        mostrarToast(data?.mensaje || "Correo o contraseña incorrectos", "err");
+
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        mostrarToast("Correo o contraseña incorrectos.", "err");
+        return;
       }
-    } catch {
-      mostrarToast("Error de conexión al iniciar sesión", "err");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      const loginAprobado = Boolean(data && (data.status === "exito" || data.exito === true || data.uid));
+      if (!loginAprobado) {
+        mostrarToast(data?.mensaje || "Correo o contraseña incorrectos.", "err");
+        return;
+      }
+
+      const uidValido = sanitizarUid(data.uid);
+      if (!uidValido) {
+        mostrarToast("La cuenta no tiene una tarjeta TNE válida asociada.", "err");
+        return;
+      }
+
+      state.sesionActiva = true;
+      state.uid = uidValido;
+      if (data.nombre) state.nombre = data.nombre;
+      if (data.rut) state.rut = data.rut;
+      state.correo = correo;
+      state.saldo = null;
+      state.prestamoEmergencia = false;
+      guardarPerfilLocal();
+      loginBackdrop?.classList.remove("open");
+      limpiarRecuadrosRegistro();
+      actualizarUI();
+      procesandoTransaccion = false;
+      await consultarSaldoEnNube();
+      mostrarPestana("saldo", true);
+    } catch (err) {
+      mostrarToast(
+        err?.name === "AbortError" ? "Tiempo de espera agotado al iniciar sesión." : "Error de conexión al iniciar sesión",
+        "err"
+      );
+    } finally {
+      procesandoTransaccion = false;
     }
   });
 
   document.getElementById("registerForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (procesandoTransaccion) return;
+
     const uidIngresado = sanitizarUid(document.getElementById("regUid")?.value || state.uid);
+    const nombre = document.getElementById("regNombre").value.trim().replace(/\s+/g, " ").toUpperCase();
+    const rutRaw = document.getElementById("regRut").value.trim();
+    const institucion = document.getElementById("regInstitucion").value.trim().replace(/\s+/g, " ");
+    const correo = document.getElementById("regCorreo").value.trim().toLowerCase();
+    const pass = document.getElementById("regPassword").value.trim();
+
+    if (nombre.length < 2) {
+      mostrarToast("⚠️ Ingresa tu nombre completo.", "err");
+      return;
+    }
+    if (!validarRut(rutRaw)) {
+      mostrarToast("⚠️ El RUT ingresado no es válido. Revisa el dígito verificador.", "err");
+      return;
+    }
+    if (institucion.length < 2) {
+      mostrarToast("⚠️ Ingresa el nombre de tu institución.", "err");
+      return;
+    }
+    if (!correo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+      mostrarToast("⚠️ Ingresa un correo electrónico válido.", "err");
+      return;
+    }
     if (!uidIngresado) {
-      mostrarToast("⚠️ Primero presiona 'Vincular TNE' y acerca tu tarjeta detrás del celular.", "err");
+      mostrarToast("⚠️ Ingresa un código TNE válido (mín. 4 caracteres hexadecimales) o escanéalo por NFC.", "err");
+      return;
+    }
+    if (pass.length < 4) {
+      mostrarToast("⚠️ La contraseña debe tener al menos 4 caracteres.", "err");
       return;
     }
 
-    state.uid = uidIngresado;
-    state.nombre = document.getElementById("regNombre").value.trim().toUpperCase();
-    state.rut = document.getElementById("regRut").value.trim();
-    state.institucion = document.getElementById("regInstitucion").value.trim();
-    state.correo = document.getElementById("regCorreo").value.trim();
-    const pass = document.getElementById("regPassword").value.trim() || "1234";
+    const rutNormalizado = normalizarRut(rutRaw);
+    procesandoTransaccion = true;
+    cancelarPollingEnCurso();
 
     try {
-      await fetch(`${CONFIG.supabase.url}/rest/v1/rpc/registrar_cuenta_tne`, {
+      const resReg = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/registrar_cuenta_tne`, {
         method: "POST",
         headers: headersSupabase,
         body: JSON.stringify({
-          p_uid: state.uid,
-          p_nombre: state.nombre,
-          p_rut: state.rut,
-          p_institucion: state.institucion,
-          p_correo: state.correo,
+          p_uid: uidIngresado,
+          p_nombre: nombre,
+          p_rut: rutNormalizado,
+          p_institucion: institucion,
+          p_correo: correo,
           p_saldo_inicial: 0,
           p_password: pass
         })
       });
 
-      await fetch(`${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(state.uid)}`, {
-        method: "PATCH",
-        headers: headersSupabase,
-        body: JSON.stringify({
-          nombre: state.nombre,
-          rut: state.rut,
-          institucion: state.institucion,
-          correo: state.correo,
-          estado: "Activo"
-        })
-      });
+      if (!resReg.ok) throw new Error(`HTTP ${resReg.status}`);
+      const regData = await resReg.json().catch(() => null);
+      if (regData && (regData.status === "error" || regData.exito === false)) {
+        mostrarToast(regData.mensaje || "No se pudo registrar la cuenta.", "err");
+        return;
+      }
 
+      await fetchConTimeout(
+        `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidIngresado)}`,
+        {
+          method: "PATCH",
+          headers: headersSupabase,
+          body: JSON.stringify({
+            nombre,
+            rut: rutNormalizado,
+            institucion,
+            correo,
+            estado: "Activo"
+          })
+        }
+      );
+
+      state.uid = uidIngresado;
+      state.nombre = nombre;
+      state.rut = rutNormalizado;
+      state.institucion = institucion;
+      state.correo = correo;
       state.sesionActiva = true;
       state.saldo = null;
+      state.prestamoEmergencia = false;
       guardarPerfilLocal();
       limpiarRecuadrosRegistro();
       actualizarUI();
+      procesandoTransaccion = false;
       await consultarSaldoEnNube();
       mostrarToast(`✔ Cuenta creada y TNE ${state.uid} vinculada`, "ok");
       mostrarPestana("saldo", true);
-    } catch {
-      mostrarToast("Error al guardar cuenta en la nube", "err");
+    } catch (err) {
+      mostrarToast(
+        err?.name === "AbortError"
+          ? "Tiempo de espera agotado al registrar la cuenta."
+          : "No se pudo guardar la cuenta en el servidor. Intenta nuevamente.",
+        "err"
+      );
+    } finally {
+      procesandoTransaccion = false;
     }
   });
 }
 
 document.addEventListener("DOMContentLoaded", inicializarApp);
 
-// Puente nativo llamado desde MainActivity.java al leer una TNE física o sticker NFC
 window.onNativeNfcScanned = function(uidLeido) {
   const uidLimpio = sanitizarUid(uidLeido);
   if (!uidLimpio) return;
 
-  reproducirFeedbackSensorial(true);
-
   const modalNfc = document.getElementById("nfcGuideModalBackdrop");
   if (modalNfc && modalNfc.classList.contains("open")) {
+    reproducirFeedbackSensorial(true);
     const cb = window.callbackNfcGuiaActivo;
     cerrarMenuGuiaNfc();
     if (typeof cb === "function") {
@@ -977,6 +1464,13 @@ window.onNativeNfcScanned = function(uidLeido) {
     return;
   }
 
-  // Si toca un sticker/tag NFC del validador estando en la pestaña Pagar
-  pagarPasajeWeb("Pago NFC en Validador (-$200)");
+  const tarifaTxt = tarifaEscolarTexto();
+  const esStickerValidador = Boolean(CONFIG.stickersValidadores?.[uidLimpio]);
+  if (esStickerValidador) {
+    state.validadorId = CONFIG.stickersValidadores[uidLimpio];
+    guardarPerfilLocal();
+    pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
+  } else if (pestanaActual === "pago") {
+    pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
+  }
 };

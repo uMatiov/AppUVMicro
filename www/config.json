@@ -15,6 +15,9 @@
     "alertaSaldoBajo": 400,
     "montosRecarga": [1000, 2000, 5000]
   },
+  "stickersValidadores": {
+    "044110AE8F6181": "VAL-01"
+  },
   "zonasMapa": {
     "Playa Ancha": { "cx": 38, "cy": 52, "coords": "-33.028, -71.641" },
     "Plan de Valparaíso": { "cx": 105, "cy": 72, "coords": "-33.045, -71.619" },
