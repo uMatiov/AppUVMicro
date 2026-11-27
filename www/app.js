@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = {
   }
 };
 
-// Limpieza única al actualizar desde la versión que precargaba un UID fijo
+// Limpieza única al actualizar desde versiones antiguas que precargaban un UID fijo
 if (localStorage.getItem("tne_app_schema") !== "v2_clean_auth") {
   const darkGuardado = localStorage.getItem("tne_dark_mode");
   localStorage.clear();
@@ -47,8 +47,8 @@ let nfcAbortController = null;
 let cooldownIntervalId = null;
 let cooldownSegsRestantes = 0;
 let syncEpoch = 0;
-let pestanaActual = "cuenta";
 
+// shortcut: historial sigue en localStorage para no agregar una tabla extra en el prototipo academico.
 let state = {
   sesionActiva: localStorage.getItem("tne_sesion_activa") === "true",
   uid: localStorage.getItem("tne_uid_activo") || "",
@@ -67,7 +67,6 @@ let state = {
   historial: JSON.parse(localStorage.getItem("tne_historial_web") || "[]")
 };
 
-// Fetch con timeout (8s por defecto) y soporte para AbortSignal externo
 async function fetchConTimeout(url, options = {}, timeoutMs = CONFIG.app.timeoutMs || 8000) {
   const controller = new AbortController();
   const externalSignal = options.signal;
@@ -197,7 +196,9 @@ async function inicializarApp() {
         zonasMapa: jsonExterno.zonasMapa || DEFAULT_CONFIG.zonasMapa
       };
     }
-  } catch {}
+  } catch {
+    // shortcut: Si se abre via file:// o falla config.json, usa DEFAULT_CONFIG.
+  }
 
   headersSupabase = {
     apikey: CONFIG.supabase.anonKey,
@@ -365,8 +366,10 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
 
   const uidObjetivo = state.uid;
   const estadoParaServidor = activo ? `PAGANDO_${state.validadorId}` : "Activo";
+  const stageSub = document.getElementById("stageSubtitle");
+
   try {
-    await fetchConTimeout(
+    const res = await fetchConTimeout(
       `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidObjetivo)}`,
       {
         method: "PATCH",
@@ -376,16 +379,23 @@ async function anunciarCelularEnValidadorEspecifico(activo) {
     );
 
     if (activo && state.sesionActiva && state.uid === uidObjetivo) {
-      const stageSub = document.getElementById("stageSubtitle");
+      if (!res.ok) {
+        if (stageSub) stageSub.textContent = "⚠️ No se pudo activar el pago NFC en el servidor.";
+        return;
+      }
       if (stageSub) {
         const nfcOk = !window.AndroidNfc || window.AndroidNfc.tieneNfcActivo();
         stageSub.textContent = nfcOk
-          ? "📲 Antena NFC lista: acerca la espalda de tu celular al lector azul del validador."
+          ? "📲 Listo: acerca la espalda de tu celular al escáner del validador."
           : "⚠️ Enciende el NFC en los ajustes de tu teléfono para pagar acercándolo.";
       }
       timerModoCelular = setTimeout(() => anunciarCelularEnValidadorEspecifico(false), 60000);
     }
-  } catch {}
+  } catch {
+    if (activo && stageSub) {
+      stageSub.textContent = "⚠️ Sin conexión para preparar el pago NFC.";
+    }
+  }
 }
 
 async function notificarCobroExitosoAlValidador(uidObjetivo = state.uid) {
@@ -409,7 +419,6 @@ function mostrarPestana(tabId, silencioso = false) {
     if (!silencioso) mostrarToast("Crea tu cuenta o inicia sesión primero.", "warn");
     tabId = "cuenta";
   }
-  pestanaActual = tabId;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".view-panel").forEach((p) => p.classList.toggle("active", p.id === `view-${tabId}`));
 
@@ -590,7 +599,7 @@ function renderizarHistorial() {
 async function consultarSaldoEnNube() {
   if (!state.sesionActiva || !state.uid || procesandoTransaccion) return;
 
-  // Fix red lenta: si ya hay una consulta en vuelo, se salta este ciclo para dejarla terminar
+  // En red lenta, deja terminar la consulta en vuelo en vez de cancelarla
   if (pollingAbortController) return;
 
   const controller = new AbortController();
@@ -602,7 +611,7 @@ async function consultarSaldoEnNube() {
   const syncText = document.getElementById("syncText");
 
   try {
-    const columnas = "uid,nombre,rut,institucion,correo,saldo,estado";
+    const columnas = "uid,nombre,rut,institucion,correo,saldo,estado,prestamo_activo";
     const url = `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidInicio)}&select=${columnas}`;
     const res = await fetchConTimeout(url, {
       headers: headersSupabase,
@@ -628,6 +637,7 @@ async function consultarSaldoEnNube() {
       if (datos.institucion) state.institucion = datos.institucion;
       if (datos.correo) state.correo = datos.correo;
 
+      state.prestamoEmergencia = Boolean(datos.prestamo_activo);
       const nuevoSaldo = Number(datos.saldo);
 
       if (state.saldo !== null && Number.isFinite(nuevoSaldo) && nuevoSaldo < state.saldo) {
@@ -644,9 +654,6 @@ async function consultarSaldoEnNube() {
       } else if (state.saldo !== null && Number.isFinite(nuevoSaldo) && nuevoSaldo > state.saldo) {
         const abono = nuevoSaldo - state.saldo;
         state.saldo = nuevoSaldo;
-        if (nuevoSaldo >= CONFIG.tarifas.escolar && state.prestamoEmergencia) {
-          state.prestamoEmergencia = false;
-        }
         registrarMovimientoLocal("Recarga de Saldo", abono, obtenerSaldoVisible());
       } else if (Number.isFinite(nuevoSaldo)) {
         state.saldo = nuevoSaldo;
@@ -688,7 +695,6 @@ function ocultarPantallaCompletaPago() {
   }
 }
 
-// Pantalla de carga en pantalla completa mientras el celular espera respuesta de Supabase
 function mostrarPantallaCargaPago(
   titulo = "Validando Pasaje...",
   subtitulo = "Esperando confirmación del servidor..."
@@ -824,7 +830,6 @@ function iniciarCooldownAntiDobleCobro() {
   }, 1000);
 }
 
-// Cobro estricto con pantalla de carga y protección contra cierre de sesión en curso
 async function pagarPasajeWeb(origenCobro = "Pago Móvil Micro") {
   if (!state.sesionActiva || !state.uid) {
     mostrarToast("Primero registra tu cuenta y vincula tu TNE.", "warn");
@@ -949,18 +954,50 @@ async function activarPrestamoEmergencia() {
   mostrarPantallaCargaPago("Activando Préstamo...", "Sincronizando viaje de emergencia...");
 
   try {
-    await notificarCobroExitosoAlValidador(uidOperacion);
+    const res = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/activar_prestamo_tne`, {
+      method: "POST",
+      headers: headersSupabase,
+      body: JSON.stringify({ card_uid: uidOperacion })
+    });
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
     if (!state.sesionActiva || state.uid !== uidOperacion) return;
 
-    state.prestamoEmergencia = true;
-    guardarPerfilLocal();
-    reproducirFeedbackSensorial(true);
-    registrarMovimientoLocal("Préstamo Escolar de Emergencia", -CONFIG.tarifas.escolar, obtenerSaldoVisible());
-    actualizarUI();
+    if (data && data.status === "concedido") {
+      await notificarCobroExitosoAlValidador(uidOperacion);
+      if (!state.sesionActiva || state.uid !== uidOperacion) return;
+
+      state.prestamoEmergencia = true;
+      if (data.saldo_restante !== undefined) state.saldo = Number(data.saldo_restante);
+      guardarPerfilLocal();
+      reproducirFeedbackSensorial(true);
+      registrarMovimientoLocal("Préstamo Escolar de Emergencia", -CONFIG.tarifas.escolar, obtenerSaldoVisible());
+      actualizarUI();
+      mostrarPantallaCompletaPago(
+        true,
+        "¡Viaje de Emergencia!",
+        `Préstamo Escolar activado (-${tarifaTxt}). Se descontará en tu próxima recarga.`
+      );
+    } else {
+      reproducirFeedbackSensorial(false);
+      mostrarPantallaCompletaPago(
+        false,
+        "Préstamo No Disponible",
+        data?.mensaje || "No se pudo activar el préstamo escolar."
+      );
+    }
+  } catch (err) {
+    if (!state.sesionActiva || state.uid !== uidOperacion) return;
+    reproducirFeedbackSensorial(false);
+    const esTimeout = err?.name === "AbortError";
     mostrarPantallaCompletaPago(
-      true,
-      "¡Viaje de Emergencia!",
-      `Préstamo Escolar activado (-${tarifaTxt}). Se descontará en tu próxima recarga.`
+      false,
+      esTimeout ? "Tiempo Agotado" : "Error de Conexión",
+      esTimeout
+        ? "La red tardó demasiado al registrar el préstamo."
+        : "No se pudo registrar el préstamo en el servidor."
     );
   } finally {
     syncEpoch += 1;
@@ -989,20 +1026,6 @@ async function recargarSaldoWeb(monto) {
   }
 
   const uidOperacion = state.uid;
-  const teniaPrestamo = state.prestamoEmergencia;
-  const montoEfectivo = teniaPrestamo ? Math.max(0, valor - CONFIG.tarifas.escolar) : valor;
-
-  if (teniaPrestamo && montoEfectivo === 0) {
-    cancelarPollingEnCurso();
-    state.prestamoEmergencia = false;
-    guardarPerfilLocal();
-    reproducirFeedbackSensorial(true);
-    registrarMovimientoLocal(`Recarga (Saldó préstamo -${tarifaTxt})`, 0, obtenerSaldoVisible());
-    actualizarUI();
-    mostrarToast(`✔ Préstamo escolar de ${tarifaTxt} saldado correctamente`, "ok");
-    return;
-  }
-
   procesandoTransaccion = true;
   cancelarPollingEnCurso();
   actualizarEstadoBotonPago();
@@ -1011,7 +1034,7 @@ async function recargarSaldoWeb(monto) {
     const res = await fetchConTimeout(`${CONFIG.supabase.url}/rest/v1/rpc/recargar_saldo`, {
       method: "POST",
       headers: headersSupabase,
-      body: JSON.stringify({ card_uid: uidOperacion, monto: montoEfectivo })
+      body: JSON.stringify({ card_uid: uidOperacion, monto: valor })
     });
 
     if (!state.sesionActiva || state.uid !== uidOperacion) return;
@@ -1021,18 +1044,25 @@ async function recargarSaldoWeb(monto) {
     if (!state.sesionActiva || state.uid !== uidOperacion) return;
 
     if (data && (data.status === "exito" || data.exito === true)) {
+      const saldoPrestamo = Boolean(data.prestamo_saldado);
+      const montoAcreditado = data.monto_acreditado !== undefined ? Number(data.monto_acreditado) : valor;
+
       state.prestamoEmergencia = false;
-      state.saldo = (state.saldo !== null ? Number(state.saldo) : 0) + montoEfectivo;
+      state.saldo =
+        data.saldo_restante !== undefined
+          ? Number(data.saldo_restante)
+          : (state.saldo !== null ? Number(state.saldo) : 0) + montoAcreditado;
+
       guardarPerfilLocal();
       reproducirFeedbackSensorial(true);
       registrarMovimientoLocal(
-        teniaPrestamo ? `Recarga (Saldó préstamo -${tarifaTxt})` : "Recarga de Saldo",
-        montoEfectivo,
+        saldoPrestamo ? `Recarga (Saldó préstamo -${tarifaTxt})` : "Recarga de Saldo",
+        montoAcreditado,
         obtenerSaldoVisible()
       );
       actualizarUI();
       mostrarToast(
-        teniaPrestamo
+        saldoPrestamo
           ? `✔ Recarga +${formatearPesos(valor)} (Se descontaron -${tarifaTxt} del préstamo)`
           : `✔ Recarga exitosa (+${formatearPesos(valor)})`,
         "ok"
@@ -1195,7 +1225,6 @@ function configurarEventos() {
   document.getElementById("bannerEmergencyBtn")?.addEventListener("click", activarPrestamoEmergencia);
   document.getElementById("payViewLoanBtn")?.addEventListener("click", activarPrestamoEmergencia);
 
-  // Solo permite cerrar el overlay al tocarlo si ya terminó de cargar
   document.getElementById("paymentFullOverlay")?.addEventListener("click", () => {
     const overlay = document.getElementById("paymentFullOverlay");
     if (overlay && !overlay.classList.contains("is-loading")) {
@@ -1319,7 +1348,7 @@ function configurarEventos() {
       if (data.rut) state.rut = data.rut;
       state.correo = correo;
       state.saldo = null;
-      state.prestamoEmergencia = false;
+      state.prestamoEmergencia = Boolean(data.prestamo_activo);
       guardarPerfilLocal();
       loginBackdrop?.classList.remove("open");
       limpiarRecuadrosRegistro();
@@ -1365,7 +1394,7 @@ function configurarEventos() {
       return;
     }
     if (!uidIngresado) {
-      mostrarToast("⚠️ Ingresa un código TNE válido (mín. 4 caracteres hexadecimales) o escanéalo por NFC.", "err");
+      mostrarToast("⚠️ Ingresa un código TNE válido (8 o 14 caracteres hexadecimales) o escanéalo por NFC.", "err");
       return;
     }
     if (pass.length < 4) {
@@ -1398,21 +1427,6 @@ function configurarEventos() {
         mostrarToast(regData.mensaje || "No se pudo registrar la cuenta.", "err");
         return;
       }
-
-      await fetchConTimeout(
-        `${CONFIG.supabase.url}/rest/v1/tarjetas_autorizadas?uid=eq.${encodeURIComponent(uidIngresado)}`,
-        {
-          method: "PATCH",
-          headers: headersSupabase,
-          body: JSON.stringify({
-            nombre,
-            rut: rutNormalizado,
-            institucion,
-            correo,
-            estado: "Activo"
-          })
-        }
-      );
 
       state.uid = uidIngresado;
       state.nombre = nombre;
@@ -1464,13 +1478,12 @@ window.onNativeNfcScanned = function(uidLeido) {
     return;
   }
 
+  // Fuera del modal solo cobra si el chip leído es un sticker validador registrado en config.json
   const tarifaTxt = tarifaEscolarTexto();
   const esStickerValidador = Boolean(CONFIG.stickersValidadores?.[uidLimpio]);
   if (esStickerValidador) {
     state.validadorId = CONFIG.stickersValidadores[uidLimpio];
     guardarPerfilLocal();
-    pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
-  } else if (pestanaActual === "pago") {
     pagarPasajeWeb(`Pago NFC en Validador (-${tarifaTxt})`);
   }
 };
